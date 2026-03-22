@@ -71,6 +71,7 @@ model Template {
   headerContent  String?
   footerContent  String?
   buttons        String?     // Array of button objects (stored as JSON string)
+  mediaAttachments String?  // Array of media attachment objects (stored as JSON string)
   status         String    @default("draft") // draft, pending, submitted, approved, rejected
   rejectionReason String?
   metaTemplateId  String?

@@ -12,8 +12,34 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ArrowLeft, Plus, X } from "lucide-react";
+import { ArrowLeft, Plus, X, Link as LinkIcon, Phone, MessageSquare, Paperclip } from "lucide-react";
 import Link from "next/link";
+
+interface TemplateButton {
+  type: "QUICK_REPLY" | "URL" | "PHONE_NUMBER";
+  text: string;
+  url?: string;
+  phone_number?: string;
+}
+
+interface MediaAttachment {
+  type: "image" | "video" | "document" | "audio";
+  url: string;
+  name: string;
+}
+
+const BUTTON_TYPES = [
+  { value: "QUICK_REPLY", label: "Quick Reply" },
+  { value: "URL", label: "URL Button" },
+  { value: "PHONE_NUMBER", label: "Phone Number" },
+];
+
+const MEDIA_TYPES = [
+  { value: "image", label: "Image" },
+  { value: "video", label: "Video" },
+  { value: "document", label: "Document" },
+  { value: "audio", label: "Audio" },
+];
 
 export default function CreateTemplatePage() {
   const router = useRouter();
@@ -29,6 +55,8 @@ export default function CreateTemplatePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [variables, setVariables] = useState<string[]>([]);
+  const [buttons, setButtons] = useState<TemplateButton[]>([]);
+  const [mediaAttachments, setMediaAttachments] = useState<MediaAttachment[]>([]);
 
   // Extract variables from body (e.g., {{1}}, {{2}})
   const extractVariables = (text: string) => {
@@ -77,7 +105,26 @@ export default function CreateTemplatePage() {
       const res = await fetch("/api/templates", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...formData, status: "draft" }),
+        body: JSON.stringify({
+          ...formData,
+          status: "draft",
+          buttons:
+            buttons.length > 0
+              ? JSON.stringify(
+                  buttons.map((b) => {
+                    const clean: Record<string, string> = { type: b.type, text: b.text };
+                    if (b.type === "URL" && b.url) clean.url = b.url;
+                    if (b.type === "PHONE_NUMBER" && b.phone_number)
+                      clean.phone_number = b.phone_number;
+                    return clean;
+                  })
+                )
+              : null,
+          mediaAttachments:
+            mediaAttachments.filter((m) => m.url).length > 0
+              ? JSON.stringify(mediaAttachments.filter((m) => m.url))
+              : null,
+        }),
       });
 
       const data = await res.json();
@@ -96,7 +143,10 @@ export default function CreateTemplatePage() {
 
         if (!submitRes.ok) {
           // Template was saved as draft but Meta submission failed
-          setError(submitData.error || "Template saved but failed to submit to Meta. You can retry from the template page.");
+          setError(
+            submitData.error ||
+              "Template saved but failed to submit to Meta. You can retry from the template page.",
+          );
           router.push(`/dashboard/templates/${data.id}`);
           return;
         }
@@ -118,6 +168,28 @@ export default function CreateTemplatePage() {
     const newBody = formData.body + ` {{${nextNum}}}`;
     handleBodyChange(newBody);
   };
+
+  // Buttons
+  const addButton = () => {
+    if (buttons.length >= 4) return;
+    setButtons([...buttons, { type: "QUICK_REPLY", text: "" }]);
+  };
+  const removeButton = (i: number) =>
+    setButtons(buttons.filter((_, idx) => idx !== i));
+  const updateButton = (i: number, changes: Partial<TemplateButton>) =>
+    setButtons(buttons.map((b, idx) => (idx === i ? { ...b, ...changes } : b)));
+
+  // Media
+  const addMedia = () => {
+    if (mediaAttachments.length >= 4) return;
+    setMediaAttachments([...mediaAttachments, { type: "image", url: "", name: "" }]);
+  };
+  const removeMedia = (i: number) =>
+    setMediaAttachments(mediaAttachments.filter((_, idx) => idx !== i));
+  const updateMedia = (i: number, changes: Partial<MediaAttachment>) =>
+    setMediaAttachments(
+      mediaAttachments.map((m, idx) => (idx === i ? { ...m, ...changes } : m))
+    );
 
   return (
     <div className="max-w-2xl">
@@ -289,6 +361,126 @@ export default function CreateTemplatePage() {
                   setFormData({ ...formData, footerContent: e.target.value })
                 }
               />
+            </div>
+
+            {/* Buttons */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label>Buttons (max 4)</Label>
+                {buttons.length < 4 && (
+                  <Button type="button" variant="outline" size="sm" onClick={addButton}>
+                    <Plus className="w-3 h-3 mr-1" />
+                    Add Button
+                  </Button>
+                )}
+              </div>
+              {buttons.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No buttons added. Up to 4 buttons supported.
+                </p>
+              )}
+              {buttons.map((btn, i) => (
+                <div key={i} className="p-3 border rounded-md bg-gray-50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-gray-600">Button {i + 1}</span>
+                    <button type="button" onClick={() => removeButton(i)} className="text-red-400 hover:text-red-600">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      className="w-full h-9 px-2 border rounded-md bg-white text-sm"
+                      value={btn.type}
+                      onChange={(e) =>
+                        updateButton(i, {
+                          type: e.target.value as TemplateButton["type"],
+                          url: undefined,
+                          phone_number: undefined,
+                        })
+                      }
+                    >
+                      {BUTTON_TYPES.map((t) => (
+                        <option key={t.value} value={t.value}>{t.label}</option>
+                      ))}
+                    </select>
+                    <Input
+                      placeholder="Button text"
+                      value={btn.text}
+                      onChange={(e) => updateButton(i, { text: e.target.value })}
+                      className="h-9 text-sm"
+                    />
+                  </div>
+                  {btn.type === "URL" && (
+                    <Input
+                      placeholder="https://example.com"
+                      value={btn.url || ""}
+                      onChange={(e) => updateButton(i, { url: e.target.value })}
+                      className="h-9 text-sm"
+                    />
+                  )}
+                  {btn.type === "PHONE_NUMBER" && (
+                    <Input
+                      placeholder="+91XXXXXXXXXX"
+                      value={btn.phone_number || ""}
+                      onChange={(e) => updateButton(i, { phone_number: e.target.value })}
+                      className="h-9 text-sm"
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Media Attachments */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label>Media Attachments (max 4)</Label>
+                {mediaAttachments.length < 4 && (
+                  <Button type="button" variant="outline" size="sm" onClick={addMedia}>
+                    <Paperclip className="w-3 h-3 mr-1" />
+                    Add Media
+                  </Button>
+                )}
+              </div>
+              {mediaAttachments.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No media attached. Add up to 4 images, videos, or documents.
+                </p>
+              )}
+              {mediaAttachments.map((media, i) => (
+                <div key={i} className="p-3 border rounded-md bg-gray-50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-gray-600">Media {i + 1}</span>
+                    <button type="button" onClick={() => removeMedia(i)} className="text-red-400 hover:text-red-600">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      className="h-9 px-2 border rounded-md bg-white text-sm"
+                      value={media.type}
+                      onChange={(e) =>
+                        updateMedia(i, { type: e.target.value as MediaAttachment["type"] })
+                      }
+                    >
+                      {MEDIA_TYPES.map((t) => (
+                        <option key={t.value} value={t.value}>{t.label}</option>
+                      ))}
+                    </select>
+                    <Input
+                      placeholder="Display name"
+                      value={media.name}
+                      onChange={(e) => updateMedia(i, { name: e.target.value })}
+                      className="h-9 text-sm"
+                    />
+                  </div>
+                  <Input
+                    placeholder="Media URL (https://...)"
+                    value={media.url}
+                    onChange={(e) => updateMedia(i, { url: e.target.value })}
+                    className="h-9 text-sm"
+                  />
+                </div>
+              ))}
             </div>
           </CardContent>
           <div className="p-6 pt-0 flex space-x-4">

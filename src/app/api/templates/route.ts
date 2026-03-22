@@ -44,6 +44,7 @@ export async function POST(request: Request) {
       headerContent,
       footerContent,
       buttons,
+      mediaAttachments,
       status,
     } = body;
 
@@ -88,6 +89,7 @@ export async function POST(request: Request) {
         headerContent: headerContent || null,
         footerContent: footerContent || null,
         buttons: buttons || null,
+        mediaAttachments: mediaAttachments || null,
         status: status || "draft",
         submittedAt: status === "submitted" ? new Date() : null,
       },

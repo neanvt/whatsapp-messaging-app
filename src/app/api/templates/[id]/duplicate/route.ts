@@ -45,6 +45,7 @@ export async function POST(
         headerContent: original.headerContent,
         footerContent: original.footerContent,
         buttons: original.buttons,
+        mediaAttachments: (original as any).mediaAttachments ?? null,
         status: "draft",
       } as Parameters<typeof prisma.template.create>[0]["data"],
     });
