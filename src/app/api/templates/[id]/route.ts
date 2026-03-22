@@ -84,7 +84,7 @@ export async function PUT(
   }
 }
 
-// DELETE - Delete a template (draft only)
+// DELETE - Delete a template
 export async function DELETE(
   request: Request,
   { params }: { params: { id: string } }
@@ -106,11 +106,15 @@ export async function DELETE(
       return NextResponse.json({ error: "Template not found" }, { status: 404 });
     }
 
-    if (template.status !== "draft") {
-      return NextResponse.json(
-        { error: "Only draft templates can be deleted" },
-        { status: 400 }
-      );
+    // If it was submitted to Meta, delete it there too
+    if (template.metaTemplateId && process.env.META_WABA_ID && process.env.META_ACCESS_TOKEN) {
+      await fetch(
+        `https://graph.facebook.com/v19.0/${process.env.META_WABA_ID}/message_templates?hsm_id=${template.metaTemplateId}&name=${template.name}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${process.env.META_ACCESS_TOKEN}` },
+        }
+      ).catch((e) => console.warn("Meta delete warning:", e));
     }
 
     await prisma.template.delete({

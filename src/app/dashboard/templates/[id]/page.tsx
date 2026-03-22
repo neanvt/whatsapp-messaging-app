@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, CheckCircle, XCircle, Clock, Send } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, Clock, Send, Trash2 } from "lucide-react";
 import Link from "next/link";
 
 interface Template {
@@ -27,9 +27,30 @@ interface Template {
 export default function TemplateDetailPage() {
   const params = useParams();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [template, setTemplate] = useState<Template | null>(null);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
   const justSubmitted = searchParams.get("submitted") === "true";
+
+  const handleDelete = async () => {
+    if (!template) return;
+    if (!confirm(`Delete template "${template.name}"? This cannot be undone.`)) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/templates/${template.id}`, { method: "DELETE" });
+      if (res.ok) {
+        router.push("/dashboard/templates");
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to delete template");
+        setDeleting(false);
+      }
+    } catch {
+      alert("Something went wrong");
+      setDeleting(false);
+    }
+  };
 
   useEffect(() => {
     fetchTemplate();
@@ -100,7 +121,19 @@ export default function TemplateDetailPage() {
               <CardTitle className="text-xl">{template.name}</CardTitle>
               <CardDescription>Created {new Date(template.createdAt).toLocaleDateString()}</CardDescription>
             </div>
-            {getStatusBadge(template.status)}
+            <div className="flex items-center gap-2">
+              {getStatusBadge(template.status)}
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                onClick={handleDelete}
+                disabled={deleting}
+              >
+                <Trash2 className="w-4 h-4 mr-1" />
+                {deleting ? "Deleting..." : "Delete"}
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-6">

@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, FileText, RefreshCw, Send } from "lucide-react";
+import { Plus, FileText, RefreshCw, Send, Trash2 } from "lucide-react";
 import Link from "next/link";
 
 interface Template {
@@ -20,6 +20,25 @@ interface Template {
 export default function TemplatesPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!confirm(`Delete template "${name}"? This cannot be undone.`)) return;
+    setDeletingId(id);
+    try {
+      const res = await fetch(`/api/templates/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setTemplates((prev) => prev.filter((t) => t.id !== id));
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to delete template");
+      }
+    } catch {
+      alert("Something went wrong");
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   useEffect(() => {
     fetchTemplates();
@@ -135,6 +154,15 @@ export default function TemplatesPage() {
                   )}
                   <Button variant="outline" asChild>
                     <Link href={`/dashboard/templates/${template.id}`}>View</Link>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                    onClick={() => handleDelete(template.id, template.name)}
+                    disabled={deletingId === template.id}
+                  >
+                    <Trash2 className="w-4 h-4" />
                   </Button>
                 </div>
               </CardContent>
