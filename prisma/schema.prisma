@@ -65,6 +65,7 @@ model Template {
 
   name           String
   category       String    // marketing, utility, authentication
+  language       String    @default("en")
   body           String
   headerType     String?   // none, text, image, video, document
   headerContent  String?

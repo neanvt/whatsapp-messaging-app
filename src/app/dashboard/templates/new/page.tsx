@@ -5,7 +5,13 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { ArrowLeft, Plus, X } from "lucide-react";
 import Link from "next/link";
 
@@ -14,6 +20,7 @@ export default function CreateTemplatePage() {
   const [formData, setFormData] = useState({
     name: "",
     category: "utility",
+    language: "en",
     body: "",
     headerType: "none",
     headerContent: "",
@@ -94,7 +101,8 @@ export default function CreateTemplatePage() {
   };
 
   const insertVariable = () => {
-    const nextNum = variables.length > 0 ? Math.max(...variables.map(Number)) + 1 : 1;
+    const nextNum =
+      variables.length > 0 ? Math.max(...variables.map(Number)) + 1 : 1;
     const newBody = formData.body + ` {{${nextNum}}}`;
     handleBodyChange(newBody);
   };
@@ -109,7 +117,9 @@ export default function CreateTemplatePage() {
           </Link>
         </Button>
         <h1 className="text-2xl font-bold">Create Template</h1>
-        <p className="text-muted-foreground">Design a new WhatsApp message template</p>
+        <p className="text-muted-foreground">
+          Design a new WhatsApp message template
+        </p>
       </div>
 
       <Card>
@@ -133,7 +143,14 @@ export default function CreateTemplatePage() {
                 id="name"
                 placeholder="e.g., order_confirmation"
                 value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_")})}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    name: e.target.value
+                      .toLowerCase()
+                      .replace(/[^a-z0-9_]/g, "_"),
+                  })
+                }
                 required
               />
               <p className="text-xs text-muted-foreground">
@@ -145,13 +162,18 @@ export default function CreateTemplatePage() {
               <Label>Category</Label>
               <div className="flex space-x-4">
                 {["marketing", "utility", "authentication"].map((cat) => (
-                  <label key={cat} className="flex items-center space-x-2 cursor-pointer">
+                  <label
+                    key={cat}
+                    className="flex items-center space-x-2 cursor-pointer"
+                  >
                     <input
                       type="radio"
                       name="category"
                       value={cat}
                       checked={formData.category === cat}
-                      onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                      onChange={(e) =>
+                        setFormData({ ...formData, category: e.target.value })
+                      }
                       className="w-4 h-4"
                     />
                     <span className="text-sm capitalize">{cat}</span>
@@ -161,12 +183,38 @@ export default function CreateTemplatePage() {
             </div>
 
             <div className="space-y-2">
+              <Label htmlFor="language">Language</Label>
+              <select
+                id="language"
+                className="w-full h-10 px-3 border rounded-md bg-background text-sm"
+                value={formData.language}
+                onChange={(e) =>
+                  setFormData({ ...formData, language: e.target.value })
+                }
+              >
+                <option value="en">English</option>
+                <option value="en_US">English (US)</option>
+                <option value="hi">Hindi (हिन्दी)</option>
+                <option value="mr">Marathi (मराठी)</option>
+                <option value="gu">Gujarati (ગુજરાતી)</option>
+                <option value="ta">Tamil (தமிழ்)</option>
+                <option value="te">Telugu (తెలుగు)</option>
+                <option value="kn">Kannada (ಕನ್ನಡ)</option>
+                <option value="ml">Malayalam (മലയാളം)</option>
+                <option value="bn">Bengali (বাংলা)</option>
+                <option value="pa">Punjabi (ਪੰਜਾਬੀ)</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="headerType">Header (Optional)</Label>
               <select
                 id="headerType"
                 className="w-full h-10 px-3 border rounded-md bg-background text-sm"
                 value={formData.headerType}
-                onChange={(e) => setFormData({ ...formData, headerType: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, headerType: e.target.value })
+                }
               >
                 <option value="none">No Header</option>
                 <option value="text">Text</option>
@@ -182,7 +230,9 @@ export default function CreateTemplatePage() {
                       : `Enter ${formData.headerType} URL`
                   }
                   value={formData.headerContent}
-                  onChange={(e) => setFormData({ ...formData, headerContent: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, headerContent: e.target.value })
+                  }
                   className="mt-2"
                 />
               )}
@@ -191,7 +241,12 @@ export default function CreateTemplatePage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label htmlFor="body">Message Body</Label>
-                <Button type="button" variant="outline" size="sm" onClick={insertVariable}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={insertVariable}
+                >
                   <Plus className="w-3 h-3 mr-1" />
                   Add Variable
                 </Button>
@@ -206,7 +261,8 @@ export default function CreateTemplatePage() {
               />
               {variables.length > 0 && (
                 <p className="text-xs text-muted-foreground">
-                  Variables detected: {variables.map((v) => `{{${v}}}`).join(", ")}
+                  Variables detected:{" "}
+                  {variables.map((v) => `{{${v}}}`).join(", ")}
                 </p>
               )}
             </div>
@@ -217,15 +273,26 @@ export default function CreateTemplatePage() {
                 id="footer"
                 placeholder="Reply STOP to unsubscribe"
                 value={formData.footerContent}
-                onChange={(e) => setFormData({ ...formData, footerContent: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, footerContent: e.target.value })
+                }
               />
             </div>
           </CardContent>
           <div className="p-6 pt-0 flex space-x-4">
-            <Button type="button" variant="outline" onClick={(e) => handleSubmit(e, false)} disabled={loading}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={(e) => handleSubmit(e, false)}
+              disabled={loading}
+            >
               Save as Draft
             </Button>
-            <Button type="button" onClick={(e) => handleSubmit(e, true)} disabled={loading}>
+            <Button
+              type="button"
+              onClick={(e) => handleSubmit(e, true)}
+              disabled={loading}
+            >
               {loading ? "Submitting..." : "Submit for Approval"}
             </Button>
           </div>
