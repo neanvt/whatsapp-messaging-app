@@ -70,7 +70,7 @@ export async function POST(
       );
     }
 
-    if (template.status !== "draft") {
+    if (template.status !== "draft" && template.status !== "rejected") {
       return NextResponse.json(
         { error: "Only draft templates can be submitted" },
         { status: 400 },

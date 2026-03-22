@@ -31,7 +31,29 @@ export default function TemplateDetailPage() {
   const [template, setTemplate] = useState<Template | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   const justSubmitted = searchParams.get("submitted") === "true";
+
+  const handleSubmitToMeta = async () => {
+    if (!template) return;
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      const res = await fetch(`/api/templates/${template.id}/submit`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setTemplate(data);
+        router.replace(`/dashboard/templates/${template.id}?submitted=true`);
+      } else {
+        setSubmitError(data.error || "Failed to submit to Meta");
+      }
+    } catch {
+      setSubmitError("Something went wrong");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const handleDelete = async () => {
     if (!template) return;
@@ -161,10 +183,25 @@ export default function TemplateDetailPage() {
             </div>
           )}
 
+          {submitError && (
+            <div className="p-3 text-sm text-red-500 bg-red-50 rounded-md">
+              {submitError}
+            </div>
+          )}
+
           {template.status === "rejected" && template.rejectionReason && (
             <div>
               <h4 className="text-sm font-medium text-red-600 mb-2">Rejection Reason</h4>
               <p className="p-3 bg-red-50 border border-red-200 rounded-md text-red-700">{template.rejectionReason}</p>
+            </div>
+          )}
+
+          {(template.status === "draft" || template.status === "rejected") && (
+            <div className="pt-4">
+              <Button onClick={handleSubmitToMeta} disabled={submitting}>
+                <Send className="w-4 h-4 mr-2" />
+                {submitting ? "Submitting to Meta..." : "Submit to Meta for Approval"}
+              </Button>
             </div>
           )}
 

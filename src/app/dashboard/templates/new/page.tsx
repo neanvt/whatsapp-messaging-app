@@ -73,25 +73,37 @@ export default function CreateTemplatePage() {
     }
 
     try {
+      // Step 1: Always create as draft first
       const res = await fetch("/api/templates", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...formData,
-          status: submit ? "submitted" : "draft",
-        }),
+        body: JSON.stringify({ ...formData, status: "draft" }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
         setError(data.error || "Failed to create template");
-      } else {
-        if (submit) {
-          router.push(`/dashboard/templates/${data.id}?submitted=true`);
-        } else {
-          router.push("/dashboard/templates");
+        return;
+      }
+
+      if (submit) {
+        // Step 2: Submit to Meta via the submit endpoint
+        const submitRes = await fetch(`/api/templates/${data.id}/submit`, {
+          method: "POST",
+        });
+        const submitData = await submitRes.json();
+
+        if (!submitRes.ok) {
+          // Template was saved as draft but Meta submission failed
+          setError(submitData.error || "Template saved but failed to submit to Meta. You can retry from the template page.");
+          router.push(`/dashboard/templates/${data.id}`);
+          return;
         }
+
+        router.push(`/dashboard/templates/${data.id}?submitted=true`);
+      } else {
+        router.push("/dashboard/templates");
       }
     } catch {
       setError("Something went wrong");
