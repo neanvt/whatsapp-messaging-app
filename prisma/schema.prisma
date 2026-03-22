@@ -1,0 +1,139 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String
+  fullName      String
+  phone         String?
+  companyName   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastLoginAt   DateTime?
+  isActive      Boolean   @default(true)
+  emailVerified Boolean   @default(false)
+
+  whatsappNumbers WhatsAppNumber[]
+  templates      Template[]
+  messages       Message[]
+  payments       Payment[]
+  credits        UserCredits?
+  auditLogs      AuditLog[]
+}
+
+model UserCredits {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  totalCredits    Int       @default(0)
+  usedCredits     Int       @default(0)
+  lastRechargedAt DateTime?
+  updatedAt       DateTime  @updatedAt
+}
+
+model WhatsAppNumber {
+  id                    String    @id @default(cuid())
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  phoneNumber           String    @unique
+  wabaId                String?
+  phoneNumberId         String?
+  verificationStatus     String    @default("pending") // pending, in_progress, verified, failed
+  verificationCode      String?
+  verifiedAt            DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  templates Template[]
+  messages  Message[]
+}
+
+model Template {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  whatsappNumberId String?
+  whatsappNumber  WhatsAppNumber? @relation(fields: [whatsappNumberId], references: [id])
+
+  name           String
+  category       String    // marketing, utility, authentication
+  body           String
+  headerType     String?   // none, text, image, video, document
+  headerContent  String?
+  footerContent  String?
+  buttons        String?     // Array of button objects (stored as JSON string)
+  status         String    @default("draft") // draft, pending, submitted, approved, rejected
+  rejectionReason String?
+  metaTemplateId  String?
+  submittedAt     DateTime?
+  reviewedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  messages Message[]
+}
+
+model Message {
+  id                  String    @id @default(cuid())
+  userId              String
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  whatsappNumberId     String
+  whatsappNumber      WhatsAppNumber @relation(fields: [whatsappNumberId], references: [id])
+  templateId          String?
+  template            Template? @relation(fields: [templateId], references: [id])
+
+  metaMessageId   String?
+  recipientPhone  String
+  templateVariables String?    // Array of variable values (stored as JSON string)
+  status          String    @default("queued") // queued, sent, delivered, read, failed
+  errorMessage    String?
+  sentAt          DateTime?
+  deliveredAt     DateTime?
+  readAt          DateTime?
+  createdAt       DateTime  @default(now())
+}
+
+model Payment {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  razorpayPaymentId   String?
+  razorpayOrderId     String    @unique
+  razorpayInvoiceId   String?
+  razorpaySignature   String?
+
+  amount          Int       // In paise
+  amountInr       Float
+  currency        String    @default("INR")
+
+  creditsPurchased Int
+  creditsUsed     Int       @default(0)
+  creditsRemaining Int      @default(0)
+
+  status          String    @default("pending") // pending, processing, completed, failed, refunded
+  paymentMethod   String?
+  paidAt          DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model AuditLog {
+  id         String    @id @default(cuid())
+  userId     String?
+  user       User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action     String
+  entityType String
+  entityId   String?
+  oldValues  String?
+  newValues  String?
+  ipAddress  String?
+  createdAt  DateTime  @default(now())
+}
