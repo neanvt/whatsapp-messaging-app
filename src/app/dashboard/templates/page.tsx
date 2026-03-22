@@ -2,10 +2,17 @@
 
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, FileText, RefreshCw, Send, Trash2 } from "lucide-react";
+import { Plus, FileText, RefreshCw, Send, Trash2, Copy } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 interface Template {
   id: string;
@@ -21,6 +28,25 @@ export default function TemplatesPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const router = useRouter();
+
+  const handleDuplicate = async (id: string) => {
+    setDuplicatingId(id);
+    try {
+      const res = await fetch(`/api/templates/${id}/duplicate`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        router.push(`/dashboard/templates/${data.id}`);
+      } else {
+        alert(data.error || "Failed to duplicate template");
+      }
+    } catch {
+      alert("Something went wrong");
+    } finally {
+      setDuplicatingId(null);
+    }
+  };
 
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Delete template "${name}"? This cannot be undone.`)) return;
@@ -81,7 +107,9 @@ export default function TemplatesPage() {
       authentication: "bg-green-100 text-green-800",
     };
     return (
-      <span className={`px-2 py-1 text-xs font-medium rounded-full ${colors[category] || "bg-gray-100"}`}>
+      <span
+        className={`px-2 py-1 text-xs font-medium rounded-full ${colors[category] || "bg-gray-100"}`}
+      >
         {category}
       </span>
     );
@@ -92,7 +120,9 @@ export default function TemplatesPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold">Message Templates</h1>
-          <p className="text-muted-foreground">Create and manage your WhatsApp message templates</p>
+          <p className="text-muted-foreground">
+            Create and manage your WhatsApp message templates
+          </p>
         </div>
         <Button asChild>
           <Link href="/dashboard/templates/new">
@@ -112,10 +142,13 @@ export default function TemplatesPage() {
             <FileText className="w-12 h-12 text-muted-foreground mb-4" />
             <h3 className="text-lg font-medium mb-2">No Templates Yet</h3>
             <p className="text-muted-foreground text-center mb-4">
-              Create your first message template to start sending WhatsApp messages.
+              Create your first message template to start sending WhatsApp
+              messages.
             </p>
             <Button asChild>
-              <Link href="/dashboard/templates/new">Create Your First Template</Link>
+              <Link href="/dashboard/templates/new">
+                Create Your First Template
+              </Link>
             </Button>
           </CardContent>
         </Card>
@@ -138,7 +171,8 @@ export default function TemplatesPage() {
                       {template.body.length > 100 ? "..." : ""}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Created {new Date(template.createdAt).toLocaleDateString()}
+                      Created{" "}
+                      {new Date(template.createdAt).toLocaleDateString()}
                     </p>
                   </div>
                 </div>
@@ -146,14 +180,27 @@ export default function TemplatesPage() {
                   {getStatusBadge(template.status)}
                   {template.status === "approved" && (
                     <Button variant="outline" size="sm" asChild>
-                      <Link href={`/dashboard/messages?template=${template.id}`}>
+                      <Link
+                        href={`/dashboard/messages?template=${template.id}`}
+                      >
                         <Send className="w-4 h-4 mr-1" />
                         Send
                       </Link>
                     </Button>
                   )}
                   <Button variant="outline" asChild>
-                    <Link href={`/dashboard/templates/${template.id}`}>View</Link>
+                    <Link href={`/dashboard/templates/${template.id}`}>
+                      View
+                    </Link>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    title="Duplicate as draft"
+                    onClick={() => handleDuplicate(template.id)}
+                    disabled={duplicatingId === template.id}
+                  >
+                    <Copy className="w-4 h-4" />
                   </Button>
                   <Button
                     variant="outline"

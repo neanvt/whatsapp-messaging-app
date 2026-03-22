@@ -3,9 +3,23 @@
 import { useState, useEffect } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, CheckCircle, XCircle, Clock, Send, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Send,
+  Trash2,
+  Copy,
+} from "lucide-react";
 import Link from "next/link";
 
 interface Template {
@@ -32,15 +46,36 @@ export default function TemplateDetailPage() {
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const justSubmitted = searchParams.get("submitted") === "true";
+
+  const handleDuplicate = async () => {
+    if (!template) return;
+    setDuplicating(true);
+    try {
+      const res = await fetch(`/api/templates/${template.id}/duplicate`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        router.push(`/dashboard/templates/${data.id}`);
+      } else {
+        alert(data.error || "Failed to duplicate template");
+        setDuplicating(false);
+      }
+    } catch {
+      alert("Something went wrong");
+      setDuplicating(false);
+    }
+  };
 
   const handleSubmitToMeta = async () => {
     if (!template) return;
     setSubmitting(true);
     setSubmitError("");
     try {
-      const res = await fetch(`/api/templates/${template.id}/submit`, { method: "POST" });
+      const res = await fetch(`/api/templates/${template.id}/submit`, {
+        method: "POST",
+      });
       const data = await res.json();
       if (res.ok) {
         setTemplate(data);
@@ -57,10 +92,13 @@ export default function TemplateDetailPage() {
 
   const handleDelete = async () => {
     if (!template) return;
-    if (!confirm(`Delete template "${template.name}"? This cannot be undone.`)) return;
+    if (!confirm(`Delete template "${template.name}"? This cannot be undone.`))
+      return;
     setDeleting(true);
     try {
-      const res = await fetch(`/api/templates/${template.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/templates/${template.id}`, {
+        method: "DELETE",
+      });
       if (res.ok) {
         router.push("/dashboard/templates");
       } else {
@@ -95,20 +133,38 @@ export default function TemplateDetailPage() {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "approved":
-        return <Badge variant="success" className="flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Approved</Badge>;
+        return (
+          <Badge variant="success" className="flex items-center gap-1">
+            <CheckCircle className="w-3 h-3" /> Approved
+          </Badge>
+        );
       case "pending":
-        return <Badge variant="warning" className="flex items-center gap-1"><Clock className="w-3 h-3" /> Pending</Badge>;
+        return (
+          <Badge variant="warning" className="flex items-center gap-1">
+            <Clock className="w-3 h-3" /> Pending
+          </Badge>
+        );
       case "submitted":
-        return <Badge variant="secondary" className="flex items-center gap-1"><Clock className="w-3 h-3" /> Submitted</Badge>;
+        return (
+          <Badge variant="secondary" className="flex items-center gap-1">
+            <Clock className="w-3 h-3" /> Submitted
+          </Badge>
+        );
       case "rejected":
-        return <Badge variant="destructive" className="flex items-center gap-1"><XCircle className="w-3 h-3" /> Rejected</Badge>;
+        return (
+          <Badge variant="destructive" className="flex items-center gap-1">
+            <XCircle className="w-3 h-3" /> Rejected
+          </Badge>
+        );
       default:
         return <Badge variant="outline">{status}</Badge>;
     }
   };
 
   if (loading) {
-    return <div className="flex items-center justify-center py-12">Loading...</div>;
+    return (
+      <div className="flex items-center justify-center py-12">Loading...</div>
+    );
   }
 
   if (!template) {
@@ -130,7 +186,9 @@ export default function TemplateDetailPage() {
             <Clock className="w-5 h-5 text-blue-600" />
             <div>
               <p className="font-medium text-blue-900">Template Submitted!</p>
-              <p className="text-sm text-blue-700">Meta will review your template within 24-48 hours.</p>
+              <p className="text-sm text-blue-700">
+                Meta will review your template within 24-48 hours.
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -141,10 +199,22 @@ export default function TemplateDetailPage() {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-xl">{template.name}</CardTitle>
-              <CardDescription>Created {new Date(template.createdAt).toLocaleDateString()}</CardDescription>
+              <CardDescription>
+                Created {new Date(template.createdAt).toLocaleDateString()}
+              </CardDescription>
             </div>
             <div className="flex items-center gap-2">
               {getStatusBadge(template.status)}
+              <Button
+                variant="outline"
+                size="sm"
+                title="Duplicate as draft"
+                onClick={handleDuplicate}
+                disabled={duplicating}
+              >
+                <Copy className="w-4 h-4 mr-1" />
+                {duplicating ? "Duplicating..." : "Duplicate"}
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -160,26 +230,42 @@ export default function TemplateDetailPage() {
         </CardHeader>
         <CardContent className="space-y-6">
           <div>
-            <h4 className="text-sm font-medium text-muted-foreground mb-2">Category</h4>
-            <span className="capitalize px-3 py-1 bg-gray-100 rounded-full text-sm">{template.category}</span>
+            <h4 className="text-sm font-medium text-muted-foreground mb-2">
+              Category
+            </h4>
+            <span className="capitalize px-3 py-1 bg-gray-100 rounded-full text-sm">
+              {template.category}
+            </span>
           </div>
 
           {template.headerType && template.headerType !== "none" && (
             <div>
-              <h4 className="text-sm font-medium text-muted-foreground mb-2">Header ({template.headerType})</h4>
-              <p className="p-3 bg-gray-50 rounded-md">{template.headerContent}</p>
+              <h4 className="text-sm font-medium text-muted-foreground mb-2">
+                Header ({template.headerType})
+              </h4>
+              <p className="p-3 bg-gray-50 rounded-md">
+                {template.headerContent}
+              </p>
             </div>
           )}
 
           <div>
-            <h4 className="text-sm font-medium text-muted-foreground mb-2">Message Body</h4>
-            <p className="p-3 bg-gray-50 rounded-md whitespace-pre-wrap">{template.body}</p>
+            <h4 className="text-sm font-medium text-muted-foreground mb-2">
+              Message Body
+            </h4>
+            <p className="p-3 bg-gray-50 rounded-md whitespace-pre-wrap">
+              {template.body}
+            </p>
           </div>
 
           {template.footerContent && (
             <div>
-              <h4 className="text-sm font-medium text-muted-foreground mb-2">Footer</h4>
-              <p className="p-3 bg-gray-50 rounded-md">{template.footerContent}</p>
+              <h4 className="text-sm font-medium text-muted-foreground mb-2">
+                Footer
+              </h4>
+              <p className="p-3 bg-gray-50 rounded-md">
+                {template.footerContent}
+              </p>
             </div>
           )}
 
@@ -191,8 +277,12 @@ export default function TemplateDetailPage() {
 
           {template.status === "rejected" && template.rejectionReason && (
             <div>
-              <h4 className="text-sm font-medium text-red-600 mb-2">Rejection Reason</h4>
-              <p className="p-3 bg-red-50 border border-red-200 rounded-md text-red-700">{template.rejectionReason}</p>
+              <h4 className="text-sm font-medium text-red-600 mb-2">
+                Rejection Reason
+              </h4>
+              <p className="p-3 bg-red-50 border border-red-200 rounded-md text-red-700">
+                {template.rejectionReason}
+              </p>
             </div>
           )}
 
@@ -200,7 +290,7 @@ export default function TemplateDetailPage() {
             <div className="pt-4">
               <Button onClick={handleSubmitToMeta} disabled={submitting}>
                 <Send className="w-4 h-4 mr-2" />
-                {submitting ? "Submitting to Meta..." : "Submit to Meta for Approval"}
+                {submitting ? "Saving..." : "Save"}
               </Button>
             </div>
           )}
