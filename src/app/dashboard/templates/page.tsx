@@ -27,6 +27,9 @@ interface Template {
 export default function TemplatesPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
+  const [syncError, setSyncError] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const router = useRouter();
@@ -34,7 +37,9 @@ export default function TemplatesPage() {
   const handleDuplicate = async (id: string) => {
     setDuplicatingId(id);
     try {
-      const res = await fetch(`/api/templates/${id}/duplicate`, { method: "POST" });
+      const res = await fetch(`/api/templates/${id}/duplicate`, {
+        method: "POST",
+      });
       const data = await res.json();
       if (res.ok) {
         router.push(`/dashboard/templates/${data.id}`);
@@ -67,7 +72,7 @@ export default function TemplatesPage() {
   };
 
   useEffect(() => {
-    fetchTemplates();
+    fetchTemplates().then(() => syncFromMeta(false));
   }, []);
 
   const fetchTemplates = async () => {
@@ -81,6 +86,43 @@ export default function TemplatesPage() {
       console.error("Failed to fetch templates:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const syncFromMeta = async (showMsg = true) => {
+    setSyncing(true);
+    setSyncMsg("");
+    try {
+      const res = await fetch("/api/templates/sync", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        // Always show token expiry / credential errors, even on silent auto-sync
+        const msg = data.error || "Sync failed. Check your Meta credentials.";
+        setSyncError(true);
+        setSyncMsg(msg);
+        setTimeout(() => setSyncMsg(""), 8000);
+      } else if (data.updated > 0) {
+        // Refresh template list after sync
+        const listRes = await fetch("/api/templates");
+        if (listRes.ok) setTemplates(await listRes.json());
+        if (showMsg) {
+          setSyncError(false);
+          setSyncMsg(
+            `Synced — ${data.updated} template${data.updated !== 1 ? "s" : ""} updated.`,
+          );
+        }
+        if (showMsg) setTimeout(() => setSyncMsg(""), 4000);
+      } else if (showMsg) {
+        setSyncError(false);
+        setSyncMsg("All statuses are up to date.");
+        setTimeout(() => setSyncMsg(""), 4000);
+      }
+    } catch {
+      setSyncError(true);
+      setSyncMsg("Sync failed. Check your Meta credentials.");
+      setTimeout(() => setSyncMsg(""), 8000);
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -124,13 +166,33 @@ export default function TemplatesPage() {
             Create and manage your WhatsApp message templates
           </p>
         </div>
-        <Button asChild>
-          <Link href="/dashboard/templates/new">
-            <Plus className="w-4 h-4 mr-2" />
-            Create Template
-          </Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => syncFromMeta(true)}
+            disabled={syncing}
+            title="Sync template statuses from Meta"
+          >
+            <RefreshCw
+              className={`w-4 h-4 mr-2 ${syncing ? "animate-spin" : ""}`}
+            />
+            {syncing ? "Syncing…" : "Sync Status"}
+          </Button>
+          <Button asChild>
+            <Link href="/dashboard/templates/new">
+              <Plus className="w-4 h-4 mr-2" />
+              Create Template
+            </Link>
+          </Button>
+        </div>
       </div>
+      {syncMsg && (
+        <p
+          className={`text-sm mb-4 ${syncError ? "text-red-600 font-medium" : "text-muted-foreground"}`}
+        >
+          {syncMsg}
+        </p>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-12">

@@ -12,7 +12,15 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ArrowLeft, Plus, X, Link as LinkIcon, Phone, MessageSquare, Paperclip } from "lucide-react";
+import {
+  ArrowLeft,
+  Plus,
+  X,
+  Link as LinkIcon,
+  Phone,
+  MessageSquare,
+  Paperclip,
+} from "lucide-react";
 import Link from "next/link";
 
 interface TemplateButton {
@@ -56,7 +64,9 @@ export default function CreateTemplatePage() {
   const [error, setError] = useState("");
   const [variables, setVariables] = useState<string[]>([]);
   const [buttons, setButtons] = useState<TemplateButton[]>([]);
-  const [mediaAttachments, setMediaAttachments] = useState<MediaAttachment[]>([]);
+  const [mediaAttachments, setMediaAttachments] = useState<MediaAttachment[]>(
+    [],
+  );
 
   // Extract variables from body (e.g., {{1}}, {{2}})
   const extractVariables = (text: string) => {
@@ -112,12 +122,15 @@ export default function CreateTemplatePage() {
             buttons.length > 0
               ? JSON.stringify(
                   buttons.map((b) => {
-                    const clean: Record<string, string> = { type: b.type, text: b.text };
+                    const clean: Record<string, string> = {
+                      type: b.type,
+                      text: b.text,
+                    };
                     if (b.type === "URL" && b.url) clean.url = b.url;
                     if (b.type === "PHONE_NUMBER" && b.phone_number)
                       clean.phone_number = b.phone_number;
                     return clean;
-                  })
+                  }),
                 )
               : null,
           mediaAttachments:
@@ -182,13 +195,16 @@ export default function CreateTemplatePage() {
   // Media
   const addMedia = () => {
     if (mediaAttachments.length >= 4) return;
-    setMediaAttachments([...mediaAttachments, { type: "image", url: "", name: "" }]);
+    setMediaAttachments([
+      ...mediaAttachments,
+      { type: "image", url: "", name: "" },
+    ]);
   };
   const removeMedia = (i: number) =>
     setMediaAttachments(mediaAttachments.filter((_, idx) => idx !== i));
   const updateMedia = (i: number, changes: Partial<MediaAttachment>) =>
     setMediaAttachments(
-      mediaAttachments.map((m, idx) => (idx === i ? { ...m, ...changes } : m))
+      mediaAttachments.map((m, idx) => (idx === i ? { ...m, ...changes } : m)),
     );
 
   return (
@@ -337,18 +353,37 @@ export default function CreateTemplatePage() {
               </div>
               <textarea
                 id="body"
-                className="w-full min-h-[150px] px-3 py-2 border rounded-md bg-background text-sm"
+                className={`w-full min-h-[150px] px-3 py-2 border rounded-md bg-background text-sm ${
+                  formData.body.length > 1024
+                    ? "border-red-500 focus:ring-red-500"
+                    : ""
+                }`}
                 placeholder="Hi {{1}}, your order #{{2}} has been shipped."
                 value={formData.body}
                 onChange={(e) => handleBodyChange(e.target.value)}
                 required
               />
-              {variables.length > 0 && (
-                <p className="text-xs text-muted-foreground">
-                  Variables detected:{" "}
-                  {variables.map((v) => `{{${v}}}`).join(", ")}
+              <div className="flex items-center justify-between">
+                {variables.length > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Variables detected:{" "}
+                    {variables.map((v) => `{{${v}}}`).join(", ")}
+                  </p>
+                ) : (
+                  <span />
+                )}
+                <p
+                  className={`text-xs ${
+                    formData.body.length > 1024
+                      ? "text-red-500 font-medium"
+                      : formData.body.length > 900
+                        ? "text-yellow-600"
+                        : "text-muted-foreground"
+                  }`}
+                >
+                  {formData.body.length} / 1024
                 </p>
-              )}
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -368,7 +403,12 @@ export default function CreateTemplatePage() {
               <div className="flex items-center justify-between">
                 <Label>Buttons (max 4)</Label>
                 {buttons.length < 4 && (
-                  <Button type="button" variant="outline" size="sm" onClick={addButton}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={addButton}
+                  >
                     <Plus className="w-3 h-3 mr-1" />
                     Add Button
                   </Button>
@@ -380,10 +420,19 @@ export default function CreateTemplatePage() {
                 </p>
               )}
               {buttons.map((btn, i) => (
-                <div key={i} className="p-3 border rounded-md bg-gray-50 space-y-2">
+                <div
+                  key={i}
+                  className="p-3 border rounded-md bg-gray-50 space-y-2"
+                >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-gray-600">Button {i + 1}</span>
-                    <button type="button" onClick={() => removeButton(i)} className="text-red-400 hover:text-red-600">
+                    <span className="text-xs font-medium text-gray-600">
+                      Button {i + 1}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeButton(i)}
+                      className="text-red-400 hover:text-red-600"
+                    >
                       <X className="w-4 h-4" />
                     </button>
                   </div>
@@ -400,13 +449,17 @@ export default function CreateTemplatePage() {
                       }
                     >
                       {BUTTON_TYPES.map((t) => (
-                        <option key={t.value} value={t.value}>{t.label}</option>
+                        <option key={t.value} value={t.value}>
+                          {t.label}
+                        </option>
                       ))}
                     </select>
                     <Input
                       placeholder="Button text"
                       value={btn.text}
-                      onChange={(e) => updateButton(i, { text: e.target.value })}
+                      onChange={(e) =>
+                        updateButton(i, { text: e.target.value })
+                      }
                       className="h-9 text-sm"
                     />
                   </div>
@@ -422,7 +475,9 @@ export default function CreateTemplatePage() {
                     <Input
                       placeholder="+91XXXXXXXXXX"
                       value={btn.phone_number || ""}
-                      onChange={(e) => updateButton(i, { phone_number: e.target.value })}
+                      onChange={(e) =>
+                        updateButton(i, { phone_number: e.target.value })
+                      }
                       className="h-9 text-sm"
                     />
                   )}
@@ -435,7 +490,12 @@ export default function CreateTemplatePage() {
               <div className="flex items-center justify-between">
                 <Label>Media Attachments (max 4)</Label>
                 {mediaAttachments.length < 4 && (
-                  <Button type="button" variant="outline" size="sm" onClick={addMedia}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={addMedia}
+                  >
                     <Paperclip className="w-3 h-3 mr-1" />
                     Add Media
                   </Button>
@@ -447,10 +507,19 @@ export default function CreateTemplatePage() {
                 </p>
               )}
               {mediaAttachments.map((media, i) => (
-                <div key={i} className="p-3 border rounded-md bg-gray-50 space-y-2">
+                <div
+                  key={i}
+                  className="p-3 border rounded-md bg-gray-50 space-y-2"
+                >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-gray-600">Media {i + 1}</span>
-                    <button type="button" onClick={() => removeMedia(i)} className="text-red-400 hover:text-red-600">
+                    <span className="text-xs font-medium text-gray-600">
+                      Media {i + 1}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeMedia(i)}
+                      className="text-red-400 hover:text-red-600"
+                    >
                       <X className="w-4 h-4" />
                     </button>
                   </div>
@@ -459,11 +528,15 @@ export default function CreateTemplatePage() {
                       className="h-9 px-2 border rounded-md bg-white text-sm"
                       value={media.type}
                       onChange={(e) =>
-                        updateMedia(i, { type: e.target.value as MediaAttachment["type"] })
+                        updateMedia(i, {
+                          type: e.target.value as MediaAttachment["type"],
+                        })
                       }
                     >
                       {MEDIA_TYPES.map((t) => (
-                        <option key={t.value} value={t.value}>{t.label}</option>
+                        <option key={t.value} value={t.value}>
+                          {t.label}
+                        </option>
                       ))}
                     </select>
                     <Input

@@ -77,6 +77,15 @@ export async function POST(
       );
     }
 
+    if (template.body.length > 1024) {
+      return NextResponse.json(
+        {
+          error: `Character Limit Exceeded — The Body field can't have more than 1,024 characters. Current: ${template.body.length}.`,
+        },
+        { status: 400 },
+      );
+    }
+
     const wabaId = process.env.META_WABA_ID;
     const accessToken = process.env.META_ACCESS_TOKEN;
 
@@ -87,6 +96,22 @@ export async function POST(
       );
     }
 
+    // Meta requires template names to be lowercase alphanumeric + underscores only
+    const metaTemplateName = template.name
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_|_$/g, "");
+
+    const requestBody = {
+      name: metaTemplateName,
+      language: template.language ?? "en",
+      category: template.category.toUpperCase(),
+      components: buildComponents(template),
+    };
+
+    console.log("Meta API request:", JSON.stringify(requestBody, null, 2));
+
     // Call Meta Graph API to create the template
     const metaRes = await fetch(
       `https://graph.facebook.com/v19.0/${wabaId}/message_templates`,
@@ -96,12 +121,7 @@ export async function POST(
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          name: template.name,
-          language: template.language ?? "en",
-          category: template.category.toUpperCase(),
-          components: buildComponents(template),
-        }),
+        body: JSON.stringify(requestBody),
       },
     );
 
@@ -109,9 +129,26 @@ export async function POST(
 
     if (!metaRes.ok) {
       console.error("Meta API error:", metaData);
+      const isTokenExpired =
+        metaData.error?.code === 190 ||
+        (typeof metaData.error?.message === "string" &&
+          metaData.error.message.includes("Session has expired"));
+      if (isTokenExpired) {
+        return NextResponse.json(
+          {
+            error: metaData.error.message,
+            code: "META_TOKEN_EXPIRED",
+          },
+          { status: 401 },
+        );
+      }
       return NextResponse.json(
         {
-          error: metaData.error?.message || "Failed to submit template to Meta",
+          error:
+            metaData.error?.error_user_title ||
+            metaData.error?.message ||
+            "Failed to submit template to Meta",
+          detail: metaData.error?.error_user_msg || metaData.error?.error_data,
         },
         { status: 400 },
       );

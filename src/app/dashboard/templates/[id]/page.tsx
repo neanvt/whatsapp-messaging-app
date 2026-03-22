@@ -115,7 +115,9 @@ export default function TemplateDetailPage() {
   });
   const [variables, setVariables] = useState<string[]>([]);
   const [buttons, setButtons] = useState<TemplateButton[]>([]);
-  const [mediaAttachments, setMediaAttachments] = useState<MediaAttachment[]>([]);
+  const [mediaAttachments, setMediaAttachments] = useState<MediaAttachment[]>(
+    [],
+  );
 
   const isEditable = (status: string) =>
     status === "draft" || status === "rejected";
@@ -147,7 +149,9 @@ export default function TemplateDetailPage() {
       setButtons([]);
     }
     try {
-      setMediaAttachments(t.mediaAttachments ? JSON.parse(t.mediaAttachments) : []);
+      setMediaAttachments(
+        t.mediaAttachments ? JSON.parse(t.mediaAttachments) : [],
+      );
     } catch {
       setMediaAttachments([]);
     }
@@ -209,13 +213,14 @@ export default function TemplateDetailPage() {
 
   const updateMedia = (i: number, changes: Partial<MediaAttachment>) =>
     setMediaAttachments(
-      mediaAttachments.map((m, idx) => (idx === i ? { ...m, ...changes } : m))
+      mediaAttachments.map((m, idx) => (idx === i ? { ...m, ...changes } : m)),
     );
 
   const buildPayload = () => ({
     ...formData,
     headerType: formData.headerType === "none" ? null : formData.headerType,
-    headerContent: formData.headerType === "none" ? null : formData.headerContent,
+    headerContent:
+      formData.headerType === "none" ? null : formData.headerContent,
     buttons:
       buttons.length > 0
         ? JSON.stringify(
@@ -228,7 +233,7 @@ export default function TemplateDetailPage() {
               if (b.type === "PHONE_NUMBER" && b.phone_number)
                 clean.phone_number = b.phone_number;
               return clean;
-            })
+            }),
           )
         : null,
     mediaAttachments:
@@ -287,13 +292,18 @@ export default function TemplateDetailPage() {
       if (submitRes.ok) {
         setTemplate(submitData);
         router.replace(`/dashboard/templates/${template.id}?submitted=true`);
+      } else if (submitData.code === "META_TOKEN_EXPIRED") {
+        setSubmitError(
+          "Your Meta API access token has expired. Please update META_ACCESS_TOKEN in your environment and restart the server.",
+        );
       } else {
         setTemplate(putData);
         populateForm(putData);
-        setSubmitError(
+        const errMsg =
           submitData.error ||
-            "Template saved but Meta submission failed. Retry from here."
-        );
+          "Template saved but Meta submission failed. Retry from here.";
+        const detail = submitData.detail ? ` — ${submitData.detail}` : "";
+        setSubmitError(errMsg + detail);
       }
     } catch {
       setSaveError("Something went wrong");
@@ -564,17 +574,36 @@ export default function TemplateDetailPage() {
               </div>
               <textarea
                 id="body"
-                className="w-full min-h-[150px] px-3 py-2 border rounded-md bg-background text-sm"
+                className={`w-full min-h-[150px] px-3 py-2 border rounded-md bg-background text-sm ${
+                  formData.body.length > 1024
+                    ? "border-red-500 focus:ring-red-500"
+                    : ""
+                }`}
                 placeholder="Hi {{1}}, your order #{{2}} has been shipped."
                 value={formData.body}
                 onChange={(e) => handleBodyChange(e.target.value)}
                 required
               />
-              {variables.length > 0 && (
-                <p className="text-xs text-muted-foreground">
-                  Variables: {variables.map((v) => `{{${v}}}`).join(", ")}
+              <div className="flex items-center justify-between">
+                {variables.length > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Variables: {variables.map((v) => `{{${v}}}`).join(", ")}
+                  </p>
+                ) : (
+                  <span />
+                )}
+                <p
+                  className={`text-xs ${
+                    formData.body.length > 1024
+                      ? "text-red-500 font-medium"
+                      : formData.body.length > 900
+                        ? "text-yellow-600"
+                        : "text-muted-foreground"
+                  }`}
+                >
+                  {formData.body.length} / 1024
                 </p>
-              )}
+              </div>
             </div>
 
             {/* Footer */}
@@ -651,7 +680,9 @@ export default function TemplateDetailPage() {
                     <Input
                       placeholder="Button text"
                       value={btn.text}
-                      onChange={(e) => updateButton(i, { text: e.target.value })}
+                      onChange={(e) =>
+                        updateButton(i, { text: e.target.value })
+                      }
                       className="h-9 text-sm"
                     />
                   </div>
@@ -955,4 +986,3 @@ export default function TemplateDetailPage() {
     </div>
   );
 }
-
