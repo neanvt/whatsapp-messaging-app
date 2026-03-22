@@ -40,14 +40,15 @@ export async function POST(
         userId: session.user.id,
         name: copyName,
         category: original.category,
+        language: original.language,
         body: original.body,
         headerType: original.headerType,
         headerContent: original.headerContent,
         footerContent: original.footerContent,
         buttons: original.buttons,
-        mediaAttachments: (original as any).mediaAttachments ?? null,
+        mediaAttachments: original.mediaAttachments,
         status: "draft",
-      } as Parameters<typeof prisma.template.create>[0]["data"],
+      },
     });
 
     return NextResponse.json(duplicate, { status: 201 });

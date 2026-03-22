@@ -88,7 +88,7 @@ export async function PUT(
       data: {
         name: name || template.name,
         category: category || template.category,
-        language: language !== undefined ? language : (template as any).language,
+        language: language !== undefined ? language : template.language,
         body: templateBody || template.body,
         headerType: headerType !== undefined ? headerType : template.headerType,
         headerContent:
@@ -99,8 +99,8 @@ export async function PUT(
         mediaAttachments:
           mediaAttachments !== undefined
             ? mediaAttachments
-            : (template as any).mediaAttachments,
-      } as any,
+            : template.mediaAttachments,
+      },
     });
 
     return NextResponse.json(updated);
