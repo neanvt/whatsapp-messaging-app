@@ -3,9 +3,23 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Phone, CheckCircle, Clock, AlertCircle, RefreshCw, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Phone,
+  CheckCircle,
+  Clock,
+  AlertCircle,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 import Link from "next/link";
 
 interface WhatsAppNumber {
@@ -51,7 +65,9 @@ export default function NumberDetailPage({ params }: NumberDetailPageProps) {
     if (!confirm("Are you sure you want to remove this number?")) return;
     setDeleting(true);
     try {
-      const res = await fetch(`/api/numbers/${params.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/numbers/${params.id}`, {
+        method: "DELETE",
+      });
       if (res.ok) {
         router.push("/dashboard/numbers");
       } else {
@@ -113,7 +129,9 @@ export default function NumberDetailPage({ params }: NumberDetailPageProps) {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
-            <p className="text-muted-foreground">{error || "Number not found"}</p>
+            <p className="text-muted-foreground">
+              {error || "Number not found"}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -132,7 +150,9 @@ export default function NumberDetailPage({ params }: NumberDetailPageProps) {
       <Card>
         <CardHeader>
           <CardTitle>Number Details</CardTitle>
-          <CardDescription>WhatsApp Business number information</CardDescription>
+          <CardDescription>
+            WhatsApp Business number information
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="flex items-center space-x-4">
@@ -151,12 +171,16 @@ export default function NumberDetailPage({ params }: NumberDetailPageProps) {
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
               <p className="text-muted-foreground">Added</p>
-              <p className="font-medium">{new Date(number.createdAt).toLocaleDateString()}</p>
+              <p className="font-medium">
+                {new Date(number.createdAt).toLocaleDateString()}
+              </p>
             </div>
             {number.verifiedAt && (
               <div>
                 <p className="text-muted-foreground">Verified</p>
-                <p className="font-medium">{new Date(number.verifiedAt).toLocaleDateString()}</p>
+                <p className="font-medium">
+                  {new Date(number.verifiedAt).toLocaleDateString()}
+                </p>
               </div>
             )}
           </div>

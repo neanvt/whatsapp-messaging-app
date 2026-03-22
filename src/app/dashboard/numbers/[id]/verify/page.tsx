@@ -4,7 +4,13 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { ArrowLeft, CheckCircle, AlertCircle } from "lucide-react";
 import Link from "next/link";
 
@@ -113,7 +119,8 @@ export default function VerifyNumberPage({ params }: VerifyPageProps) {
             </div>
             <h2 className="text-2xl font-bold mb-2">Number Verified!</h2>
             <p className="text-muted-foreground text-center mb-6">
-              {phoneNumber} has been successfully verified. You can now create templates and send messages.
+              {phoneNumber} has been successfully verified. You can now create
+              templates and send messages.
             </p>
             <div className="flex space-x-4">
               <Button variant="outline" asChild>
@@ -142,7 +149,8 @@ export default function VerifyNumberPage({ params }: VerifyPageProps) {
         <CardHeader>
           <CardTitle>Verify Phone Number</CardTitle>
           <CardDescription>
-            Enter the 6-digit verification code sent to <strong>{phoneNumber}</strong>
+            Enter the 6-digit verification code sent to{" "}
+            <strong>{phoneNumber}</strong>
           </CardDescription>
         </CardHeader>
         <form onSubmit={verifyOtp}>
@@ -162,7 +170,9 @@ export default function VerifyNumberPage({ params }: VerifyPageProps) {
 
             {devCode && (
               <div className="p-3 text-sm bg-yellow-50 border border-yellow-200 rounded-md">
-                <p className="font-semibold text-yellow-800 mb-1">Development Mode — Verification Code</p>
+                <p className="font-semibold text-yellow-800 mb-1">
+                  Development Mode — Verification Code
+                </p>
                 <p className="text-yellow-700 text-xs mb-2">
                   No SMS gateway is configured. Use the code below to verify:
                 </p>
@@ -179,7 +189,9 @@ export default function VerifyNumberPage({ params }: VerifyPageProps) {
                 type="text"
                 placeholder="000000"
                 value={otp}
-                onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                onChange={(e) =>
+                  setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))
+                }
                 className="text-center text-2xl tracking-widest font-mono"
                 maxLength={6}
                 required
@@ -187,12 +199,17 @@ export default function VerifyNumberPage({ params }: VerifyPageProps) {
             </div>
 
             <p className="text-xs text-muted-foreground">
-              A 6-digit verification code has been generated for your number.
-              In production with an SMS gateway configured, it will be sent to your phone.
+              A 6-digit verification code has been generated for your number. In
+              production with an SMS gateway configured, it will be sent to your
+              phone.
             </p>
           </CardContent>
           <div className="p-6 pt-0 space-y-4">
-            <Button type="submit" className="w-full" disabled={loading || otp.length !== 6}>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={loading || otp.length !== 6}
+            >
               {loading ? "Verifying..." : "Verify Code"}
             </Button>
             <Button

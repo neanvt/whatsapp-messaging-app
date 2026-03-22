@@ -2,7 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Plus, Phone, RefreshCw, X } from "lucide-react";
 import Link from "next/link";
@@ -73,7 +79,9 @@ export default function NumbersPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold">WhatsApp Numbers</h1>
-          <p className="text-muted-foreground">Manage your WhatsApp Business numbers</p>
+          <p className="text-muted-foreground">
+            Manage your WhatsApp Business numbers
+          </p>
         </div>
         <Button asChild>
           <Link href="/dashboard/numbers/add">
