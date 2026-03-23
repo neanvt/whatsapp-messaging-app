@@ -4,13 +4,16 @@ import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/db";
 
 // Build Meta API components array from template fields
-function buildComponents(template: {
-  body: string;
-  headerType?: string | null;
-  headerContent?: string | null;
-  footerContent?: string | null;
-  buttons?: string | null;
-}) {
+function buildComponents(
+  template: {
+    body: string;
+    headerType?: string | null;
+    headerContent?: string | null;
+    footerContent?: string | null;
+    buttons?: string | null;
+  },
+  sampleValues?: string[],
+) {
   const components: object[] = [];
 
   if (
@@ -25,7 +28,15 @@ function buildComponents(template: {
     });
   }
 
-  components.push({ type: "BODY", text: template.body });
+  const hasVariables = /\{\{\d+\}\}/.test(template.body);
+  const bodyComponent: Record<string, unknown> = {
+    type: "BODY",
+    text: template.body,
+  };
+  if (hasVariables && sampleValues && sampleValues.length > 0) {
+    bodyComponent.example = { body_text: [sampleValues] };
+  }
+  components.push(bodyComponent);
 
   if (template.footerContent) {
     components.push({ type: "FOOTER", text: template.footerContent });
@@ -77,6 +88,17 @@ export async function POST(
       );
     }
 
+    // Parse optional sampleValues from request body
+    let sampleValues: string[] = [];
+    try {
+      const reqBody = await request.json();
+      if (Array.isArray(reqBody?.sampleValues)) {
+        sampleValues = reqBody.sampleValues.map(String);
+      }
+    } catch {
+      // No body or invalid JSON — proceed without sample values
+    }
+
     if (template.body.length > 1024) {
       return NextResponse.json(
         {
@@ -107,7 +129,7 @@ export async function POST(
       name: metaTemplateName,
       language: template.language ?? "en",
       category: template.category.toUpperCase(),
-      components: buildComponents(template),
+      components: buildComponents(template, sampleValues),
     };
 
     console.log("Meta API request:", JSON.stringify(requestBody, null, 2));

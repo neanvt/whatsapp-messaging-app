@@ -77,6 +77,10 @@ export default function SendMessagePage() {
   const [recipientText, setRecipientText] = useState("");
   const [csvFileName, setCsvFileName] = useState("");
   const [parsedRecipients, setParsedRecipients] = useState<string[]>([]);
+  // Per-recipient variable values parsed from CSV (phone → {varNum: value})
+  const [csvPerRecipientVars, setCsvPerRecipientVars] = useState<
+    Record<string, Record<number, string>>
+  >({});
   const csvInputRef = useRef<HTMLInputElement>(null);
 
   // Send progress
@@ -147,17 +151,62 @@ export default function SendMessagePage() {
     reader.onload = (ev) => {
       const text = ev.target?.result as string;
       const lines = text.split(/\r?\n/).filter(Boolean);
-      // Skip header if first row contains letters (e.g. "phone", "number")
-      const start = /[a-zA-Z]/.test(lines[0]) ? 1 : 0;
-      const phones = lines
+
+      // Detect header row and find the phone column + any numeric variable columns
+      let phoneColIndex = 0;
+      let start = 0;
+      const varColMap: Array<{ colIndex: number; varNum: number }> = [];
+
+      if (/[a-zA-Z\d]/.test(lines[0])) {
+        const rawHeaders = lines[0].split(",").map((h) => h.trim());
+        const headers = rawHeaders.map((h) => h.toLowerCase());
+        const phoneIdx = headers.findIndex((h) =>
+          /phone|mobile|tel|contact/.test(h),
+        );
+        // Only treat first row as header if it has a phone-like column or a non-pure-digit column
+        const looksLikeHeader =
+          phoneIdx >= 0 || headers.some((h) => /[a-zA-Z]/.test(h));
+        if (looksLikeHeader) {
+          start = 1;
+          phoneColIndex = phoneIdx >= 0 ? phoneIdx : 0;
+          // Columns with purely numeric headers map to template variables
+          rawHeaders.forEach((h, i) => {
+            if (/^\d+$/.test(h) && i !== phoneColIndex) {
+              varColMap.push({ colIndex: i, varNum: parseInt(h) });
+            }
+          });
+        }
+      }
+
+      const recipients = lines
         .slice(start)
         .map((line) => {
-          // Take first column and strip non-digit chars except leading +
-          const col = line.split(",")[0].trim();
-          return col.replace(/[^\d+]/g, "");
+          const cols = line.split(",");
+          let col = (cols[phoneColIndex] ?? "").trim();
+          if (!col || col.replace(/[^\d]/g, "").length < 7) {
+            col =
+              cols.find((c) => c.trim().replace(/[^\d]/g, "").length >= 7) ??
+              col;
+          }
+          const phone = col.trim().replace(/[^\d+]/g, "");
+          const vars: Record<number, string> = {};
+          varColMap.forEach(({ colIndex, varNum }) => {
+            vars[varNum] = (cols[colIndex] ?? "").trim();
+          });
+          return { phone, vars };
         })
-        .filter((p) => p.length >= 7);
-      setParsedRecipients(phones);
+        .filter(({ phone }) => phone.replace(/[^\d]/g, "").length >= 7);
+
+      setParsedRecipients(recipients.map((r) => r.phone));
+      if (varColMap.length > 0) {
+        const perVars: Record<string, Record<number, string>> = {};
+        recipients.forEach(({ phone, vars }) => {
+          perVars[phone] = vars;
+        });
+        setCsvPerRecipientVars(perVars);
+      } else {
+        setCsvPerRecipientVars({});
+      }
     };
     reader.readAsText(file);
   };
@@ -196,7 +245,15 @@ export default function SendMessagePage() {
     if (parsedRecipients.length === 0)
       return setError("Please enter at least one recipient phone number");
 
-    const missingVars = templateVariables.filter((v) => !variables[v]);
+    const hasCsvVars = Object.keys(csvPerRecipientVars).length > 0;
+    const missingVars = templateVariables.filter((v) => {
+      if (
+        hasCsvVars &&
+        Object.values(csvPerRecipientVars)[0]?.[v] !== undefined
+      )
+        return false;
+      return !variables[v];
+    });
     if (missingVars.length > 0) {
       return setError(
         `Fill in template variables: ${missingVars.map((v) => `{{${v}}}`).join(", ")}`,
@@ -224,7 +281,9 @@ export default function SendMessagePage() {
             numberId: formData.numberId,
             recipient: phone.replace(/\D/g, ""),
             templateId: formData.templateId,
-            variables: templateVariables.map((v) => variables[v]),
+            variables: templateVariables.map(
+              (v) => csvPerRecipientVars[phone]?.[v] ?? variables[v] ?? "",
+            ),
           }),
         });
         const data = await res.json();
@@ -254,6 +313,7 @@ export default function SendMessagePage() {
   const resetForm = () => {
     setRecipientText("");
     setParsedRecipients([]);
+    setCsvPerRecipientVars({});
     setCsvFileName("");
     setResults([]);
     setDone(false);
@@ -367,25 +427,49 @@ export default function SendMessagePage() {
               {/* Template Variables */}
               {templateVariables.length > 0 && (
                 <div className="space-y-3 pt-1">
-                  <Label>Template Variables</Label>
-                  {templateVariables.map((varNum) => (
-                    <div key={varNum}>
-                      <Label className="text-xs text-muted-foreground">
-                        Variable {"{{" + varNum + "}}"}
-                      </Label>
-                      <Input
-                        placeholder={"Value for {{" + varNum + "}}"}
-                        value={variables[varNum] || ""}
-                        onChange={(e) =>
-                          setVariables({
-                            ...variables,
-                            [varNum]: e.target.value,
-                          })
-                        }
-                        className="mt-1"
-                      />
-                    </div>
-                  ))}
+                  <div className="flex items-center gap-2">
+                    <Label>Template Variables</Label>
+                    {recipientMode === "csv" &&
+                      Object.keys(csvPerRecipientVars).length > 0 && (
+                        <span className="text-xs text-green-600 font-medium bg-green-50 border border-green-200 px-2 py-0.5 rounded-full">
+                          Per-recipient from CSV
+                        </span>
+                      )}
+                  </div>
+                  {templateVariables.map((varNum) => {
+                    const fromCsv =
+                      recipientMode === "csv" &&
+                      Object.values(csvPerRecipientVars)[0]?.[varNum] !==
+                        undefined;
+                    return (
+                      <div key={varNum}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <Label className="text-xs text-muted-foreground">
+                            Variable {"{{" + varNum + "}}"}
+                          </Label>
+                          {fromCsv && (
+                            <span className="text-xs text-blue-600 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded">
+                              CSV column &ldquo;{varNum}&rdquo;
+                            </span>
+                          )}
+                        </div>
+                        <Input
+                          placeholder={
+                            fromCsv
+                              ? `Fallback if CSV missing (e.g. ${Object.values(csvPerRecipientVars)[0]?.[varNum]})`
+                              : "Value for {{" + varNum + "}}"
+                          }
+                          value={variables[varNum] || ""}
+                          onChange={(e) =>
+                            setVariables({
+                              ...variables,
+                              [varNum]: e.target.value,
+                            })
+                          }
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
@@ -454,6 +538,21 @@ export default function SendMessagePage() {
                           {parsedRecipients.length} number
                           {parsedRecipients.length !== 1 ? "s" : ""} loaded
                         </p>
+                        {Object.keys(csvPerRecipientVars).length > 0 && (
+                          <p className="text-xs text-green-600 mt-1">
+                            Variable columns:{" "}
+                            {[
+                              ...new Set(
+                                Object.values(csvPerRecipientVars).flatMap(
+                                  (v) => Object.keys(v),
+                                ),
+                              ),
+                            ]
+                              .sort()
+                              .map((k) => `{{${k}}}`)
+                              .join(", ")}
+                          </p>
+                        )}
                       </>
                     ) : (
                       <>
@@ -461,8 +560,8 @@ export default function SendMessagePage() {
                           Click to upload a CSV file
                         </p>
                         <p className="text-xs text-muted-foreground mt-1">
-                          First column should contain phone numbers with country
-                          code
+                          Include a &quot;Phone&quot; column with country codes,
+                          or one column of numbers only
                         </p>
                       </>
                     )}

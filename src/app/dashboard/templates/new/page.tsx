@@ -63,6 +63,7 @@ export default function CreateTemplatePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [variables, setVariables] = useState<string[]>([]);
+  const [sampleValues, setSampleValues] = useState<string[]>([]);
   const [buttons, setButtons] = useState<TemplateButton[]>([]);
   const [mediaAttachments, setMediaAttachments] = useState<MediaAttachment[]>(
     [],
@@ -83,7 +84,17 @@ export default function CreateTemplatePage() {
 
   const handleBodyChange = (value: string) => {
     setFormData({ ...formData, body: value });
-    setVariables(extractVariables(value));
+    const vars = extractVariables(value);
+    setVariables(vars);
+    // Keep sampleValues length in sync with detected variables
+    setSampleValues((prev) => {
+      const updated = [...prev];
+      updated.length = vars.length;
+      for (let i = 0; i < vars.length; i++) {
+        if (updated[i] === undefined) updated[i] = "";
+      }
+      return updated;
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent, submit: boolean = false) => {
@@ -151,6 +162,8 @@ export default function CreateTemplatePage() {
         // Step 2: Submit to Meta via the submit endpoint
         const submitRes = await fetch(`/api/templates/${data.id}/submit`, {
           method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sampleValues }),
         });
         const submitData = await submitRes.json();
 
@@ -385,6 +398,38 @@ export default function CreateTemplatePage() {
                 </p>
               </div>
             </div>
+
+            {/* Sample Content — shown when body contains variables */}
+            {variables.length > 0 && (
+              <div className="space-y-3 p-4 bg-amber-50 border border-amber-200 rounded-md">
+                <div>
+                  <Label className="text-amber-900">
+                    Sample Content (Required by Meta)
+                  </Label>
+                  <p className="text-xs text-amber-700 mt-1">
+                    Meta requires example values for each variable. These help
+                    reviewers understand how the template will be used.
+                  </p>
+                </div>
+                {variables.map((v, i) => (
+                  <div key={v} className="space-y-1">
+                    <Label className="text-sm text-amber-800">
+                      Sample value for {`{{${v}}}`}
+                    </Label>
+                    <Input
+                      placeholder={`e.g., Neelesh`}
+                      value={sampleValues[i] ?? ""}
+                      onChange={(e) => {
+                        const updated = [...sampleValues];
+                        updated[i] = e.target.value;
+                        setSampleValues(updated);
+                      }}
+                      className="bg-white"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="footer">Footer (Optional)</Label>

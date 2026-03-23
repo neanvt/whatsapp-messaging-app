@@ -114,6 +114,7 @@ export default function TemplateDetailPage() {
     footerContent: "",
   });
   const [variables, setVariables] = useState<string[]>([]);
+  const [sampleValues, setSampleValues] = useState<string[]>([]);
   const [buttons, setButtons] = useState<TemplateButton[]>([]);
   const [mediaAttachments, setMediaAttachments] = useState<MediaAttachment[]>(
     [],
@@ -178,7 +179,16 @@ export default function TemplateDetailPage() {
 
   const handleBodyChange = (value: string) => {
     setFormData((f) => ({ ...f, body: value }));
-    setVariables(extractVariables(value));
+    const vars = extractVariables(value);
+    setVariables(vars);
+    setSampleValues((prev) => {
+      const updated = [...prev];
+      updated.length = vars.length;
+      for (let i = 0; i < vars.length; i++) {
+        if (updated[i] === undefined) updated[i] = "";
+      }
+      return updated;
+    });
   };
 
   const insertVariable = () => {
@@ -287,6 +297,8 @@ export default function TemplateDetailPage() {
       // Then submit
       const submitRes = await fetch(`/api/templates/${template.id}/submit`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sampleValues }),
       });
       const submitData = await submitRes.json();
       if (submitRes.ok) {
@@ -605,6 +617,38 @@ export default function TemplateDetailPage() {
                 </p>
               </div>
             </div>
+
+            {/* Sample Content — shown when body contains variables */}
+            {variables.length > 0 && (
+              <div className="space-y-3 p-4 bg-amber-50 border border-amber-200 rounded-md">
+                <div>
+                  <Label className="text-amber-900">
+                    Sample Content (Required by Meta)
+                  </Label>
+                  <p className="text-xs text-amber-700 mt-1">
+                    Meta requires example values for each variable. These help
+                    reviewers understand how the template will be used.
+                  </p>
+                </div>
+                {variables.map((v, i) => (
+                  <div key={v} className="space-y-1">
+                    <Label className="text-sm text-amber-800">
+                      Sample value for {`{{${v}}}`}
+                    </Label>
+                    <Input
+                      placeholder={`e.g., Neelesh`}
+                      value={sampleValues[i] ?? ""}
+                      onChange={(e) => {
+                        const updated = [...sampleValues];
+                        updated[i] = e.target.value;
+                        setSampleValues(updated);
+                      }}
+                      className="bg-white"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Footer */}
             <div className="space-y-2">
