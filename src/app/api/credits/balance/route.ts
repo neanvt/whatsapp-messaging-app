@@ -11,6 +11,16 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    // Superadmin always has unlimited credits
+    if (session.user.role === "superadmin") {
+      return NextResponse.json({
+        totalCredits: 999999999,
+        usedCredits: 0,
+        availableCredits: 999999999,
+        unlimited: true,
+      });
+    }
+
     let credits = await prisma.userCredits.findUnique({
       where: { userId: session.user.id },
     });
@@ -33,6 +43,9 @@ export async function GET() {
     });
   } catch (error) {
     console.error("Error fetching credits:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
   }
 }

@@ -20,6 +20,7 @@ model User {
   lastLoginAt   DateTime?
   isActive      Boolean   @default(true)
   emailVerified Boolean   @default(false)
+  role          String    @default("admin") // admin | superadmin
 
   whatsappNumbers WhatsAppNumber[]
   templates      Template[]
@@ -164,4 +165,19 @@ model AuditLog {
   newValues  String?
   ipAddress  String?
   createdAt  DateTime  @default(now())
+}
+
+model Package {
+  id           String   @id @default(cuid())
+  planId       String   @unique
+  name         String
+  credits      Int
+  priceInr     Int
+  priceInPaise Int
+  pricePerMsg  Float
+  isActive     Boolean  @default(true)
+  isPopular    Boolean  @default(false)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }

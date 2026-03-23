@@ -53,16 +53,19 @@ export async function POST(request: Request) {
       );
     }
 
-    // Check user credits
-    const userCredits = await prisma.userCredits.findUnique({
-      where: { userId: session.user.id },
-    });
+    // Superadmin has unlimited credits — skip balance check
+    const isSuperAdmin = session.user.role === "superadmin";
 
-    if (!userCredits || userCredits.totalCredits <= 0) {
-      return NextResponse.json(
-        { error: "Insufficient credits" },
-        { status: 400 },
-      );
+    if (!isSuperAdmin) {
+      const userCredits = await prisma.userCredits.findUnique({
+        where: { userId: session.user.id },
+      });
+      if (!userCredits || userCredits.totalCredits <= 0) {
+        return NextResponse.json(
+          { error: "Insufficient credits" },
+          { status: 400 },
+        );
+      }
     }
 
     // Create message record
@@ -77,14 +80,16 @@ export async function POST(request: Request) {
       },
     });
 
-    // Deduct credit
-    await prisma.userCredits.update({
-      where: { userId: session.user.id },
-      data: {
-        totalCredits: { decrement: 1 },
-        usedCredits: { increment: 1 },
-      },
-    });
+    // Deduct credit (superadmin is exempt)
+    if (!isSuperAdmin) {
+      await prisma.userCredits.update({
+        where: { userId: session.user.id },
+        data: {
+          totalCredits: { decrement: 1 },
+          usedCredits: { increment: 1 },
+        },
+      });
+    }
 
     // Resolve phone number ID — stored on number record, or fallback to env
     const phoneNumberId =
@@ -164,14 +169,16 @@ export async function POST(request: Request) {
     });
 
     if (finalStatus === "failed") {
-      // Refund the credit since send failed
-      await prisma.userCredits.update({
-        where: { userId: session.user.id },
-        data: {
-          totalCredits: { increment: 1 },
-          usedCredits: { decrement: 1 },
-        },
-      });
+      // Refund the credit since send failed (superadmin not charged in the first place)
+      if (!isSuperAdmin) {
+        await prisma.userCredits.update({
+          where: { userId: session.user.id },
+          data: {
+            totalCredits: { increment: 1 },
+            usedCredits: { decrement: 1 },
+          },
+        });
+      }
       return NextResponse.json(
         { error: errorMessage ?? "Failed to send message" },
         { status: 500 },

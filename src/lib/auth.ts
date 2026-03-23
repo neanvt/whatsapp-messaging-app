@@ -34,7 +34,7 @@ export const authOptions: NextAuthOptions = {
 
         const isValid = await bcrypt.compare(
           credentials.password,
-          user.passwordHash
+          user.passwordHash,
         );
 
         if (!isValid) {
@@ -51,6 +51,7 @@ export const authOptions: NextAuthOptions = {
           id: user.id,
           email: user.email,
           name: user.fullName,
+          role: user.role,
         };
       },
     }),
@@ -59,12 +60,20 @@ export const authOptions: NextAuthOptions = {
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
+        // neanvtech@gmail.com is always superadmin; override can also be set via SUPERADMIN_EMAIL env var
+        const superAdminEmail =
+          process.env.SUPERADMIN_EMAIL || "neanvtech@gmail.com";
+        token.role =
+          user.email === superAdminEmail
+            ? "superadmin"
+            : ((user as any).role ?? "admin");
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
         session.user.id = token.id as string;
+        session.user.role = token.role as string;
       }
       return session;
     },

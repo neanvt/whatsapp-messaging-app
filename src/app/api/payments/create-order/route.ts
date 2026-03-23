@@ -19,10 +19,14 @@ const getRazorpayClient = () => {
   });
 };
 
-const PLAN_CREDITS: Record<string, { credits: number; amount: number }> = {
-  starter: { credits: 100, amount: 30000 }, // ₹300 in paise
-  professional: { credits: 500, amount: 125000 }, // ₹1250 in paise
-  enterprise: { credits: 2000, amount: 400000 }, // ₹4000 in paise
+const PLAN_CREDITS_FALLBACK: Record<
+  string,
+  { credits: number; amount: number }
+> = {
+  starter: { credits: 100, amount: 30000 },
+  professional: { credits: 500, amount: 125000 },
+  enterprise: { credits: 2000, amount: 400000 },
+  business: { credits: 5000, amount: 800000 },
 };
 
 // POST - Create a Razorpay order
@@ -36,16 +40,38 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { planId } = body;
 
-    if (!planId || !PLAN_CREDITS[planId]) {
+    if (!planId) {
       return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
     }
 
-    const { credits, amount } = PLAN_CREDITS[planId];
+    // Try to load package from DB first, fall back to hardcoded
+    let credits: number;
+    let amount: number;
+
+    const dbPackage = await prisma.package.findUnique({
+      where: { planId, isActive: true },
+    });
+
+    if (dbPackage) {
+      credits = dbPackage.credits;
+      amount = dbPackage.priceInPaise;
+    } else if (PLAN_CREDITS_FALLBACK[planId]) {
+      credits = PLAN_CREDITS_FALLBACK[planId].credits;
+      amount = PLAN_CREDITS_FALLBACK[planId].amount;
+    } else {
+      return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
+    }
+
     const razorpay = getRazorpayClient();
 
     // If Razorpay is not configured, return mock data for testing
     if (!razorpay) {
-      console.log("[MOCK] Creating order for plan:", planId, "credits:", credits);
+      console.log(
+        "[MOCK] Creating order for plan:",
+        planId,
+        "credits:",
+        credits,
+      );
 
       // Create a mock order record in database
       const order = await prisma.payment.create({
@@ -101,6 +127,9 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("Error creating order:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
   }
 }

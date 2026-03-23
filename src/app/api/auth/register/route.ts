@@ -10,7 +10,7 @@ export async function POST(request: Request) {
     if (!fullName || !email || !password) {
       return NextResponse.json(
         { error: "Missing required fields" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -22,20 +22,21 @@ export async function POST(request: Request) {
     if (existingUser) {
       return NextResponse.json(
         { error: "Email already registered" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     // Hash password
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // Create user
+    // Create user — every new subscriber is an admin of their own account
     const user = await prisma.user.create({
       data: {
         fullName,
         email,
         passwordHash,
         companyName: companyName || null,
+        role: "admin",
       },
     });
 
@@ -50,13 +51,13 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       { message: "User created successfully", userId: user.id },
-      { status: 201 }
+      { status: 201 },
     );
   } catch (error) {
     console.error("Registration error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
