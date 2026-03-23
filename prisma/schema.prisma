@@ -27,6 +27,7 @@ model User {
   payments       Payment[]
   credits        UserCredits?
   auditLogs      AuditLog[]
+  conversations  Conversation[]
 }
 
 model UserCredits {
@@ -52,8 +53,9 @@ model WhatsAppNumber {
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
-  templates Template[]
-  messages  Message[]
+  templates     Template[]
+  messages      Message[]
+  conversations Conversation[]
 }
 
 model Template {
@@ -95,12 +97,35 @@ model Message {
   metaMessageId   String?
   recipientPhone  String
   templateVariables String?    // Array of variable values (stored as JSON string)
-  status          String    @default("queued") // queued, sent, delivered, read, failed
+  status          String    @default("queued") // queued, sent, delivered, read, failed, received
   errorMessage    String?
+  direction       String    @default("outbound") // outbound | inbound
+  content         String?   // raw text for free-text or inbound messages
+  conversationId  String?
+  conversation    Conversation? @relation(fields: [conversationId], references: [id])
   sentAt          DateTime?
   deliveredAt     DateTime?
   readAt          DateTime?
   createdAt       DateTime  @default(now())
+}
+
+model Conversation {
+  id                 String    @id @default(cuid())
+  userId             String
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  whatsappNumberId   String
+  whatsappNumber     WhatsAppNumber @relation(fields: [whatsappNumberId], references: [id])
+  contactPhone       String
+  contactName        String?
+  lastMessageAt      DateTime  @default(now())
+  lastMessagePreview String?
+  unreadCount        Int       @default(0)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  messages           Message[]
+
+  @@unique([whatsappNumberId, contactPhone])
 }
 
 model Payment {

@@ -107,8 +107,14 @@ export default function TemplatesPage() {
         if (listRes.ok) setTemplates(await listRes.json());
         if (showMsg) {
           setSyncError(false);
+          const parts = [];
+          if (data.updated > 0) parts.push(`${data.updated} updated`);
+          if (data.imported > 0)
+            parts.push(`${data.imported} imported from Meta`);
           setSyncMsg(
-            `Synced — ${data.updated} template${data.updated !== 1 ? "s" : ""} updated.`,
+            parts.length > 0
+              ? `Synced — ${parts.join(", ")}.`
+              : "All statuses are up to date.",
           );
         }
         if (showMsg) setTimeout(() => setSyncMsg(""), 4000);

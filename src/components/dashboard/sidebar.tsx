@@ -3,13 +3,22 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { MessageSquare, Phone, FileText, CreditCard, LayoutDashboard, Settings } from "lucide-react";
+import {
+  MessageSquare,
+  Phone,
+  FileText,
+  CreditCard,
+  LayoutDashboard,
+  Settings,
+  MessagesSquare,
+} from "lucide-react";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "WhatsApp Numbers", href: "/dashboard/numbers", icon: Phone },
   { name: "Templates", href: "/dashboard/templates", icon: FileText },
-  { name: "Messages", href: "/dashboard/messages", icon: MessageSquare },
+  { name: "Bulk Messages", href: "/dashboard/messages", icon: MessageSquare },
+  { name: "Chat", href: "/dashboard/chat", icon: MessagesSquare },
   { name: "Payments", href: "/dashboard/payments", icon: CreditCard },
 ];
 
@@ -23,7 +32,8 @@ export function Sidebar() {
       </div>
       <nav className="flex-1 px-4 space-y-1">
         {navigation.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+          const isActive =
+            pathname === item.href || pathname.startsWith(item.href + "/");
           return (
             <Link
               key={item.name}
@@ -32,7 +42,7 @@ export function Sidebar() {
                 "flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors",
                 isActive
                   ? "bg-gray-800 text-white"
-                  : "text-gray-300 hover:bg-gray-800 hover:text-white"
+                  : "text-gray-300 hover:bg-gray-800 hover:text-white",
               )}
             >
               <item.icon className="w-5 h-5 mr-3" />

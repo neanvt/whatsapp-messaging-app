@@ -2,7 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { MessageSquare, RefreshCw, Send, Search } from "lucide-react";
@@ -23,23 +29,32 @@ interface Message {
 export default function MessagesPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [search, setSearch] = useState("");
 
   useEffect(() => {
     fetchMessages();
+    // Auto-refresh every 10 seconds to pick up webhook delivery status updates
+    const interval = setInterval(() => fetchMessages(true), 10000);
+    return () => clearInterval(interval);
   }, []);
 
-  const fetchMessages = async () => {
+  const fetchMessages = async (silent = false) => {
+    if (!silent) setLoading(true);
+    else setRefreshing(true);
     try {
       const res = await fetch("/api/messages");
       if (res.ok) {
         const data = await res.json();
         setMessages(data);
+        setLastUpdated(new Date());
       }
     } catch (error) {
       console.error("Failed to fetch messages:", error);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -62,7 +77,7 @@ export default function MessagesPage() {
   const filteredMessages = messages.filter(
     (m) =>
       m.recipientPhone.includes(search) ||
-      m.template?.name.toLowerCase().includes(search.toLowerCase())
+      m.template?.name.toLowerCase().includes(search.toLowerCase()),
   );
 
   return (
@@ -70,14 +85,31 @@ export default function MessagesPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold">Message History</h1>
-          <p className="text-muted-foreground">View all sent messages and their status</p>
+          <p className="text-muted-foreground">
+            View all sent messages and their status
+          </p>
         </div>
-        <Button asChild>
-          <Link href="/dashboard/messages/send">
-            <Send className="w-4 h-4 mr-2" />
-            Send New Message
-          </Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => fetchMessages()}
+            disabled={loading || refreshing}
+          >
+            <RefreshCw
+              className={`w-4 h-4 mr-2 ${refreshing ? "animate-spin" : ""}`}
+            />
+            {lastUpdated
+              ? `Updated ${lastUpdated.toLocaleTimeString()}`
+              : "Refresh"}
+          </Button>
+          <Button asChild>
+            <Link href="/dashboard/messages/send">
+              <Send className="w-4 h-4 mr-2" />
+              Send New Message
+            </Link>
+          </Button>
+        </div>
       </div>
 
       <Card className="mb-6">
@@ -112,7 +144,9 @@ export default function MessagesPage() {
             </p>
             {!search && (
               <Button asChild>
-                <Link href="/dashboard/messages/send">Send Your First Message</Link>
+                <Link href="/dashboard/messages/send">
+                  Send Your First Message
+                </Link>
               </Button>
             )}
           </CardContent>
@@ -123,22 +157,46 @@ export default function MessagesPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b bg-gray-50">
-                  <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Recipient</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Template</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">From</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Status</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Sent</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">
+                    Recipient
+                  </th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">
+                    Template
+                  </th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">
+                    From
+                  </th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">
+                    Status
+                  </th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">
+                    Sent
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {filteredMessages.map((message) => (
                   <tr key={message.id} className="border-b">
-                    <td className="px-4 py-3 text-sm">{message.recipientPhone}</td>
-                    <td className="px-4 py-3 text-sm">{message.template?.name || "N/A"}</td>
-                    <td className="px-4 py-3 text-sm">{message.whatsappNumber?.phoneNumber || "N/A"}</td>
-                    <td className="px-4 py-3">{getStatusBadge(message.status)}</td>
+                    <td className="px-4 py-3 text-sm">
+                      {message.recipientPhone}
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      {message.template?.name || "N/A"}
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      {message.whatsappNumber?.phoneNumber || "N/A"}
+                    </td>
+                    <td className="px-4 py-3">
+                      {getStatusBadge(message.status)}
+                    </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">
-                      {message.sentAt ? new Date(message.sentAt).toLocaleString() : "-"}
+                      {message.deliveredAt
+                        ? `Delivered ${new Date(message.deliveredAt).toLocaleString()}`
+                        : message.readAt
+                          ? `Read ${new Date(message.readAt).toLocaleString()}`
+                          : message.sentAt
+                            ? new Date(message.sentAt).toLocaleString()
+                            : "-"}
                     </td>
                   </tr>
                 ))}

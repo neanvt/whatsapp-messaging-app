@@ -30,9 +30,11 @@ async function migrate() {
     }
 
     await client.execute(
-      "ALTER TABLE Template ADD COLUMN mediaAttachments TEXT"
+      "ALTER TABLE Template ADD COLUMN mediaAttachments TEXT",
     );
-    console.log("Successfully added 'mediaAttachments' column to Template table.");
+    console.log(
+      "Successfully added 'mediaAttachments' column to Template table.",
+    );
   } catch (err) {
     console.error("Migration failed:", err);
     process.exit(1);
