@@ -53,6 +53,16 @@ export async function POST(request: Request) {
       );
     }
 
+    // Authentication templates require the OTP code as the first variable.
+    // Guard here — before any message record or credit deduction — so a
+    // missing OTP never leaves a dangling message row or a mis-deducted credit.
+    if (template.category === "authentication" && !variables?.[0]) {
+      return NextResponse.json(
+        { error: "OTP code variable required for authentication template" },
+        { status: 400 },
+      );
+    }
+
     // Superadmin has unlimited credits — skip balance check
     const isSuperAdmin = session.user.role === "superadmin";
 
@@ -114,6 +124,17 @@ export async function POST(request: Request) {
         components.push({
           type: "body",
           parameters: vars.map((v: string) => ({ type: "text", text: v })),
+        });
+      }
+
+      // Authentication templates carry a copy-code URL button that requires
+      // the OTP code as its parameter; without it Meta returns (#131008).
+      if (template.category === "authentication" && vars.length > 0) {
+        components.push({
+          type: "button",
+          sub_type: "url",
+          index: "0",
+          parameters: [{ type: "text", text: vars[0] }],
         });
       }
 
