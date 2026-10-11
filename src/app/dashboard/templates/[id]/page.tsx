@@ -119,6 +119,11 @@ export default function TemplateDetailPage() {
   const [mediaAttachments, setMediaAttachments] = useState<MediaAttachment[]>(
     [],
   );
+  // Connected verified numbers — used to pick a WABA for multi-number tenants.
+  const [numbers, setNumbers] = useState<
+    { id: string; phoneNumber: string; verifiedName?: string | null }[]
+  >([]);
+  const [selectedNumberId, setSelectedNumberId] = useState<string>("");
 
   const isEditable = (status: string) =>
     status === "draft" || status === "rejected";
@@ -160,7 +165,27 @@ export default function TemplateDetailPage() {
 
   useEffect(() => {
     fetchTemplate();
+    fetchNumbers();
   }, [params.id]);
+
+  const fetchNumbers = async () => {
+    try {
+      const res = await fetch("/api/numbers");
+      if (res.ok) {
+        const data = await res.json();
+        const verified = Array.isArray(data)
+          ? data.filter(
+              (n: { verificationStatus?: string; wabaId?: string | null }) =>
+                n.verificationStatus === "verified" && n.wabaId,
+            )
+          : [];
+        setNumbers(verified);
+        if (verified.length === 1) setSelectedNumberId(verified[0].id);
+      }
+    } catch (error) {
+      console.error("Failed to fetch numbers:", error);
+    }
+  };
 
   const fetchTemplate = async () => {
     try {
@@ -294,11 +319,15 @@ export default function TemplateDetailPage() {
         setSaving(false);
         return;
       }
-      // Then submit
+      // Then submit. Pass the chosen number when the tenant has more than one
+      // connected number; a single-number tenant is auto-resolved server-side.
       const submitRes = await fetch(`/api/templates/${template.id}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sampleValues }),
+        body: JSON.stringify({
+          sampleValues,
+          ...(selectedNumberId ? { numberId: selectedNumberId } : {}),
+        }),
       });
       const submitData = await submitRes.json();
       if (submitRes.ok) {
@@ -822,6 +851,33 @@ export default function TemplateDetailPage() {
                 </div>
               ))}
             </div>
+
+            {/* WhatsApp number selector — only when the tenant has 2+ numbers.
+                Single-number tenants are auto-resolved server-side. */}
+            {numbers.length > 1 && (
+              <div className="space-y-2">
+                <Label htmlFor="submitNumber">Submit from WhatsApp number</Label>
+                <select
+                  id="submitNumber"
+                  className="w-full h-10 px-3 border rounded-md bg-background text-sm"
+                  value={selectedNumberId}
+                  onChange={(e) => setSelectedNumberId(e.target.value)}
+                >
+                  <option value="">Select a number…</option>
+                  {numbers.map((n) => (
+                    <option key={n.id} value={n.id}>
+                      {n.verifiedName
+                        ? `${n.verifiedName} (${n.phoneNumber})`
+                        : n.phoneNumber}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  You have multiple connected numbers — choose which one submits
+                  this template.
+                </p>
+              </div>
+            )}
 
             {/* Errors */}
             {(saveError || submitError) && (

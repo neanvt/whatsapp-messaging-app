@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/db";
+import { resolveWabaCredentials } from "@/lib/whatsapp";
 
 // GET - Get single template
 export async function GET(
@@ -138,19 +139,60 @@ export async function DELETE(
       );
     }
 
-    // If it was submitted to Meta, delete it there too
-    if (
-      template.metaTemplateId &&
-      process.env.META_WABA_ID &&
-      process.env.META_ACCESS_TOKEN
-    ) {
-      await fetch(
-        `https://graph.facebook.com/v19.0/${process.env.META_WABA_ID}/message_templates?hsm_id=${template.metaTemplateId}&name=${template.name}`,
-        {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${process.env.META_ACCESS_TOKEN}` },
-        },
-      ).catch((e) => console.warn("Meta delete warning:", e));
+    // If it was submitted to Meta, best-effort delete it there too using the
+    // tenant's own per-tenant WABA credentials. This is non-fatal: any missing
+    // number / credential problem simply skips the Meta call — the local delete
+    // below always runs.
+    if (template.metaTemplateId) {
+      const usableWhere = {
+        userId: session.user.id,
+        verificationStatus: "verified",
+        wabaId: { not: null },
+        accessToken: { not: null },
+      };
+
+      let number: { wabaId: string | null; accessToken: string | null } | null =
+        null;
+      if (template.whatsappNumberId) {
+        number = await prisma.whatsAppNumber.findFirst({
+          where: { id: template.whatsappNumberId, ...usableWhere },
+        });
+      }
+      if (!number) {
+        const usable = await prisma.whatsAppNumber.findMany({
+          where: usableWhere,
+        });
+        if (usable.length === 1) {
+          number = usable[0];
+        }
+      }
+
+      if (!number) {
+        console.log(
+          "[Template delete] no connected number — skipping Meta delete",
+        );
+      } else {
+        let wabaId: string | null = null;
+        let accessToken: string | null = null;
+        try {
+          ({ wabaId, accessToken } = resolveWabaCredentials(number));
+        } catch {
+          // decrypt() threw — best-effort, so skip Meta delete and never log the
+          // token or ciphertext.
+          console.warn(
+            "[Template delete] credential error — skipping Meta delete",
+          );
+        }
+        if (wabaId && accessToken) {
+          await fetch(
+            `https://graph.facebook.com/v19.0/${wabaId}/message_templates?hsm_id=${template.metaTemplateId}&name=${template.name}`,
+            {
+              method: "DELETE",
+              headers: { Authorization: `Bearer ${accessToken}` },
+            },
+          ).catch((e) => console.warn("Meta delete warning:", e));
+        }
+      }
     }
 
     await prisma.template.delete({

@@ -16,23 +16,45 @@ export function serializeNumber<T extends { accessToken?: string | null }>(
   return rest;
 }
 
-// Resolve the credentials used to call the Meta Graph API for a given number.
-// Prefers the row's own (decrypted) per-tenant token; falls back to the shared
-// env credentials only when the row has no stored token. decrypt() may throw.
+// Resolve the per-tenant credentials used to call the Meta Graph API for a
+// given number. There is NO env fallback: a number must carry its own stored
+// phoneNumberId + encrypted accessToken (captured via Embedded Signup or the
+// manual connect path). A row without stored credentials resolves to nulls, so
+// callers fail with a clear "number not connected" error instead of silently
+// sending from a shared/hardcoded number. decrypt() may throw on a bad key or
+// tampered ciphertext; callers wrap this call and treat a throw as "no creds".
 export function resolveSendCredentials(number: {
   phoneNumberId: string | null;
   accessToken: string | null;
 }): { phoneNumberId: string | null; accessToken: string | null } {
-  if (number.accessToken !== null) {
+  if (number.accessToken !== null && number.phoneNumberId !== null) {
     return {
       phoneNumberId: number.phoneNumberId,
       accessToken: decrypt(number.accessToken),
     };
   }
-  return {
-    phoneNumberId: number.phoneNumberId ?? process.env.META_PHONE_NUMBER_ID ?? null,
-    accessToken: process.env.META_ACCESS_TOKEN ?? null,
-  };
+  return { phoneNumberId: null, accessToken: null };
+}
+
+// Resolve the per-tenant WABA credentials used to call Meta's
+// /{wabaId}/message_templates endpoints (submit / sync / delete). Mirrors
+// resolveSendCredentials: there is NO env fallback — a row without a stored
+// wabaId + encrypted accessToken resolves to nulls so callers raise a clear
+// "number not connected" error instead of hitting a shared/hardcoded WABA.
+// decrypt() may throw on a bad key / tampered ciphertext; callers wrap this
+// call and treat a throw as a credential error (never log the token or
+// ciphertext).
+export function resolveWabaCredentials(number: {
+  wabaId: string | null;
+  accessToken: string | null;
+}): { wabaId: string | null; accessToken: string | null } {
+  if (number.wabaId !== null && number.accessToken !== null) {
+    return {
+      wabaId: number.wabaId,
+      accessToken: decrypt(number.accessToken),
+    };
+  }
+  return { wabaId: null, accessToken: null };
 }
 
 // Thrown when a phone number is already connected to a different tenant/user.

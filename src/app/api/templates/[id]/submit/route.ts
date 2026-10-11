@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/db";
+import { resolveWabaCredentials } from "@/lib/whatsapp";
 
 // Build Meta API components array from template fields
 function buildComponents(
@@ -88,15 +89,22 @@ export async function POST(
       );
     }
 
-    // Parse optional sampleValues from request body
+    // Parse optional sampleValues + numberId from request body. The body stream
+    // can be read only once, so read both from the SAME reqBody object — adding
+    // a second `await request.json()` would throw "body already read".
     let sampleValues: string[] = [];
+    let numberId: string | undefined;
     try {
       const reqBody = await request.json();
       if (Array.isArray(reqBody?.sampleValues)) {
         sampleValues = reqBody.sampleValues.map(String);
       }
+      numberId =
+        typeof reqBody?.numberId === "string" && reqBody.numberId.length > 0
+          ? reqBody.numberId
+          : undefined;
     } catch {
-      // No body or invalid JSON — proceed without sample values
+      // No body or invalid JSON — proceed without sample values / numberId
     }
 
     if (template.body.length > 1024) {
@@ -108,13 +116,89 @@ export async function POST(
       );
     }
 
-    const wabaId = process.env.META_WABA_ID;
-    const accessToken = process.env.META_ACCESS_TOKEN;
+    // Resolve the per-tenant WhatsApp number this template is submitted from.
+    // A "usable" number is verified with a stored wabaId + encrypted token.
+    // Precedence: explicit numberId → template binding → the sole number.
+    const usableWhere = {
+      userId: session.user.id,
+      verificationStatus: "verified",
+      wabaId: { not: null },
+      accessToken: { not: null },
+    };
 
+    let number: { id: string; wabaId: string | null; accessToken: string | null } | null =
+      null;
+
+    if (numberId) {
+      number = await prisma.whatsAppNumber.findFirst({
+        where: { id: numberId, ...usableWhere },
+      });
+      if (!number) {
+        return NextResponse.json(
+          {
+            error: "Selected WhatsApp number is not connected",
+            code: "NUMBER_NOT_CONNECTED",
+          },
+          { status: 400 },
+        );
+      }
+    }
+
+    if (!number && template.whatsappNumberId) {
+      // Explicit template→number binding, if still usable. A stale binding falls
+      // through to the user's-numbers branch below.
+      number = await prisma.whatsAppNumber.findFirst({
+        where: { id: template.whatsappNumberId, ...usableWhere },
+      });
+    }
+
+    if (!number) {
+      const usable = await prisma.whatsAppNumber.findMany({
+        where: usableWhere,
+      });
+      if (usable.length === 0) {
+        return NextResponse.json(
+          { error: "Connect a WhatsApp number before managing templates" },
+          { status: 409 },
+        );
+      }
+      if (usable.length > 1) {
+        return NextResponse.json(
+          {
+            error:
+              "Multiple WhatsApp numbers connected — specify which number to submit this template from",
+            code: "AMBIGUOUS_NUMBER",
+          },
+          { status: 400 },
+        );
+      }
+      number = usable[0];
+    }
+
+    const resolvedNumberId = number.id;
+
+    let wabaId: string | null;
+    let accessToken: string | null;
+    try {
+      ({ wabaId, accessToken } = resolveWabaCredentials(number));
+    } catch {
+      // decrypt() threw (bad key / tampered ciphertext). Never log the token or
+      // ciphertext.
+      console.error(
+        "[Template submit] credential resolution failed (encryption/config)",
+      );
+      return NextResponse.json(
+        { error: "credential error" },
+        { status: 500 },
+      );
+    }
+
+    // Defensive: the query already filtered on non-null wabaId/accessToken, so
+    // this branch is unreachable, but keep it consistent with the contract.
     if (!wabaId || !accessToken) {
       return NextResponse.json(
-        { error: "Meta API credentials not configured" },
-        { status: 500 },
+        { error: "Connect a WhatsApp number before managing templates" },
+        { status: 409 },
       );
     }
 
@@ -183,6 +267,11 @@ export async function POST(
         status: "submitted",
         metaTemplateId: metaData.id ?? null,
         submittedAt: new Date(),
+        // Bind the template to the number it was submitted from, if not already
+        // bound, so later sync/delete reuse the exact WABA without ambiguity.
+        ...(template.whatsappNumberId
+          ? {}
+          : { whatsappNumberId: resolvedNumberId }),
       },
     });
 

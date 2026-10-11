@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/db";
+import { resolveWabaCredentials } from "@/lib/whatsapp";
 import type { Prisma } from "@prisma/client";
 
 // Map Meta status strings → our local status strings
@@ -33,42 +34,111 @@ export async function POST() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const wabaId = process.env.META_WABA_ID;
-    const accessToken = process.env.META_ACCESS_TOKEN;
-
-    if (!wabaId || !accessToken) {
+    // Resolve the tenant's usable (verified + stored wabaId/token) numbers.
+    const numbers = await prisma.whatsAppNumber.findMany({
+      where: {
+        userId: session.user.id,
+        verificationStatus: "verified",
+        wabaId: { not: null },
+        accessToken: { not: null },
+      },
+    });
+    if (numbers.length === 0) {
       return NextResponse.json(
-        { error: "Meta API credentials not configured" },
-        { status: 500 },
+        { error: "Connect a WhatsApp number before managing templates" },
+        { status: 409 },
       );
     }
 
-    // Fetch all templates for this WABA from Meta
-    const metaRes = await fetch(
-      `https://graph.facebook.com/v19.0/${wabaId}/message_templates?fields=id,name,status,category,language,components&limit=250&access_token=${accessToken}`,
-    );
-
-    if (!metaRes.ok) {
-      const metaError = await metaRes.json();
-      console.error("Meta sync error:", metaError);
+    // Dedupe by wabaId so a WABA shared by several numbers is fetched once.
+    // First number encountered per WABA owns imports from it.
+    const wabaMap = new Map<
+      string,
+      { numberId: string; accessToken: string }
+    >();
+    for (const number of numbers) {
+      let creds: { wabaId: string | null; accessToken: string | null };
+      try {
+        creds = resolveWabaCredentials(number);
+      } catch {
+        // A single bad ciphertext aborts the whole sync with a clean 500 — no
+        // partial state, and never log the token or ciphertext.
+        console.error(
+          "[Template sync] credential resolution failed (encryption/config)",
+        );
+        return NextResponse.json(
+          { error: "credential error" },
+          { status: 500 },
+        );
+      }
+      // Defensive: the findMany already filtered non-null wabaId/accessToken, so
+      // a null here means a filtered row slipped through, not a crypto failure.
+      if (!creds.wabaId || !creds.accessToken) continue;
+      if (!wabaMap.has(creds.wabaId)) {
+        wabaMap.set(creds.wabaId, {
+          numberId: number.id,
+          accessToken: creds.accessToken,
+        });
+      }
+    }
+    if (wabaMap.size === 0) {
       return NextResponse.json(
-        {
-          error:
-            metaError.error?.message || "Failed to fetch templates from Meta",
-        },
-        { status: 400 },
+        { error: "Connect a WhatsApp number before managing templates" },
+        { status: 409 },
       );
     }
 
-    const metaData = await metaRes.json();
-    const metaTemplates: Array<{
+    type MetaTemplate = {
       id: string;
       name: string;
       status: string;
       category: string;
       language: string;
       components?: Array<{ type: string; text?: string; format?: string }>;
-    }> = metaData.data ?? [];
+      __sourceNumberId: string; // transient: source WhatsAppNumber id for this WABA
+    };
+
+    // Fetch templates from every distinct WABA and tag each with its source
+    // number so Meta-only imports can be bound to a concrete number.
+    const metaTemplates: MetaTemplate[] = [];
+    for (const [wabaId, { numberId, accessToken }] of wabaMap) {
+      const metaRes = await fetch(
+        `https://graph.facebook.com/v19.0/${wabaId}/message_templates?fields=id,name,status,category,language,components&limit=250&access_token=${accessToken}`,
+      );
+
+      if (!metaRes.ok) {
+        const metaError = await metaRes.json();
+        console.error("Meta sync error:", metaError);
+        const isTokenExpired =
+          metaError.error?.code === 190 ||
+          (typeof metaError.error?.message === "string" &&
+            metaError.error.message.includes("Session has expired"));
+        if (isTokenExpired) {
+          return NextResponse.json(
+            {
+              error: metaError.error.message,
+              code: "META_TOKEN_EXPIRED",
+            },
+            { status: 401 },
+          );
+        }
+        return NextResponse.json(
+          {
+            error:
+              metaError.error?.message || "Failed to fetch templates from Meta",
+          },
+          { status: 400 },
+        );
+      }
+
+      const metaData = await metaRes.json();
+      for (const t of (metaData.data ?? []) as Omit<
+        MetaTemplate,
+        "__sourceNumberId"
+      >[]) {
+        metaTemplates.push({ ...t, __sourceNumberId: numberId });
+      }
+    }
 
     console.log(
       "Meta templates fetched:",
@@ -219,6 +289,7 @@ export async function POST() {
           footerContent,
           status: mapMetaStatus(meta.status),
           metaTemplateId: meta.id,
+          whatsappNumberId: meta.__sourceNumberId,
           submittedAt: new Date(),
           reviewedAt: new Date(),
         } satisfies Prisma.TemplateUncheckedCreateInput,

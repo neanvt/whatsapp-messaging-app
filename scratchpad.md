@@ -1,6 +1,6 @@
 # WhatsApp Business Messaging Platform — Technical Reference
 
-Last updated: 2026-10-11
+Last updated: 2026-10-12
 
 ## Overview
 
@@ -41,8 +41,12 @@ Last updated: 2026-10-11
   time, not import time. Ciphertext format: `base64(iv).base64(tag).base64(ct)`.
 - `src/lib/whatsapp` — shared onboarding/send helpers: `normalizePhone`
   (strip non-digits), `serializeNumber` (drop `accessToken` ciphertext from API
-  responses), `resolveSendCredentials` (decrypt the number's own token, else env
-  fallback), `NumberOwnedByOtherTenantError`, `upsertNumberForUser`
+  responses), `resolveSendCredentials` (decrypt the number's own token for the
+  send path — `{ phoneNumberId, accessToken }`, no env fallback),
+  `resolveWabaCredentials` (sibling resolver for the template routes — returns
+  `{ wabaId, accessToken }` from the number's own decrypted token, no env
+  fallback; the single owner of template-route decrypt logic),
+  `NumberOwnedByOtherTenantError`, `upsertNumberForUser`
   (find-then-branch on the globally-unique `phoneNumber`; rejects cross-tenant
   collisions with 409 rather than overwriting — never a Prisma upsert).
 - `scripts/test-crypto.mjs` — standalone AES-256-GCM round-trip / tamper /
@@ -109,9 +113,9 @@ requires a rebuild).
 | POST | `/api/numbers/[id]/confirm` | **Neutralized** — returns 410 Gone |
 | GET/POST | `/api/templates` | List / create templates |
 | GET/PATCH/DELETE | `/api/templates/[id]` | Manage a template |
-| POST | `/api/templates/[id]/submit` | Submit template to Meta |
+| POST | `/api/templates/[id]/submit` | Submit template to Meta (per-tenant WABA; optional `numberId` in body) |
 | POST | `/api/templates/[id]/duplicate` | Duplicate a template |
-| POST | `/api/templates/sync` | Sync template statuses from Meta |
+| POST | `/api/templates/sync` | Sync template statuses from Meta (iterates ALL of the tenant's connected WABAs) |
 | GET/POST | `/api/messages` | List / query messages |
 | POST | `/api/messages/send` | **Send a template message via Meta** |
 | GET | `/api/chat/conversations` | List conversations |
@@ -166,6 +170,53 @@ decrypt/config throw is caught and leaves creds null. Missing creds → **500**
 message row is saved as `failed` and the route returns **422**. Only valid
 inside WhatsApp's 24-hour customer-service window.
 
+### Template-management flow — submit / sync / delete (per-tenant WABA)
+
+All three routes resolve `{ wabaId, accessToken }` from the signed-in tenant's own
+connected verified `WhatsAppNumber` via `resolveWabaCredentials` (in
+`src/lib/whatsapp.ts`). There is **no** `META_WABA_ID` / `META_ACCESS_TOKEN` env
+read in these routes. A "usable" number is `verificationStatus === "verified"`
+with non-null stored `wabaId` + encrypted `accessToken`. Every DB query and every
+Meta call is scoped by `session.user.id`; a user can only act on a WABA they own.
+
+**Template → WABA mapping decision** (submit & delete pick a single number):
+1. explicit `numberId` from the request body (submit only) — must be a usable
+   number owned by the user; if not → 400 `NUMBER_NOT_CONNECTED`;
+2. else the template's own `Template.whatsappNumberId` binding, if still usable
+   (a stale binding falls through);
+3. else the tenant's sole usable number;
+4. else 0 usable → 409 "Connect a WhatsApp number before managing templates";
+   >1 usable and none chosen/bound → 400 `AMBIGUOUS_NUMBER` (never silently pick).
+
+- **Submit** (`POST /api/templates/[id]/submit`): keeps `buildComponents`, Meta
+  name sanitization, the 1024-char body guard (before credential resolution), the
+  `META_TOKEN_EXPIRED` (Meta code 190 / "Session has expired") → 401 branch, and
+  the success write-back (`status: "submitted"`, `metaTemplateId`, `submittedAt`).
+  **Additive:** on success it binds `whatsappNumberId` to the resolved number when
+  the template was not already bound, so later sync/delete reuse the exact WABA.
+  Accepts an optional `numberId` in the body (single-number tenants omit it and
+  are auto-resolved — the existing frontend contract still works).
+- **Sync** (`POST /api/templates/sync`): takes no params. Resolves all usable
+  numbers, dedupes by `wabaId` (first number per WABA wins), fetches
+  `GET /{wabaId}/message_templates` once per distinct WABA, and tags each fetched
+  template with its source number (`__sourceNumberId`, transient). Meta-only
+  imports are `create`d with `whatsappNumberId` = that source number. All
+  downstream logic (status/category mapping, dedup-by-name, update loop, response
+  shape `{ synced, updated, imported, duplicatesRemoved }`) is unchanged. A
+  per-WABA Meta 190 → 401 `META_TOKEN_EXPIRED`; other non-ok → 400; sync aborts on
+  the first failing WABA.
+- **Delete** (`DELETE /api/templates/[id]`): best-effort / non-fatal Meta delete.
+  Resolves the number from `whatsappNumberId` (if usable) else the sole usable
+  number; 0 or ambiguous → **skip** the Meta call and still delete locally. A
+  decrypt throw is caught (warn, no token logged) and the Meta step skipped — the
+  local `prisma.template.delete` always runs; response unchanged.
+
+**Credential errors (submit & sync):** `resolveWabaCredentials` wraps `decrypt()`,
+which can throw on a bad key / tampered ciphertext. Submit and sync catch it and
+return a clean **500 `{ error: "credential error" }`** — never logging the token or
+ciphertext. Delete treats a decrypt throw as non-fatal (skip + warn). No connected
+number is always a clean 4xx (400/409), never a 500, never a silent env fallback.
+
 ### Webhook — `POST /api/webhooks/whatsapp`
 
 1. **Read the raw body first** so the HMAC is computed over the exact bytes Meta
@@ -214,9 +265,9 @@ The **GET** handshake echoes `hub.challenge` with 200 when `hub.mode ===
 | `TURSO_AUTH_TOKEN` | Turso auth token |
 | `META_APP_ID` | Meta app ID; used for the Embedded Signup OAuth code exchange |
 | `META_APP_SECRET` | Meta app secret; OAuth code exchange + webhook `X-Hub-Signature-256` verification (MANDATORY for delivery status) |
-| `META_ACCESS_TOKEN` | Legacy / global fallback token (used only when a number has no stored per-tenant token) |
-| `META_PHONE_NUMBER_ID` | Legacy / global fallback phone number ID |
-| `META_WABA_ID` | WhatsApp Business Account ID (global reference) |
+| `META_ACCESS_TOKEN` | Legacy / unused by app code — send AND template routes are strict per-tenant now (kept only for ad-hoc read-only Graph checks) |
+| `META_PHONE_NUMBER_ID` | Legacy / unused by app code (per-tenant now) |
+| `META_WABA_ID` | Legacy / unused by app code — template routes resolve the WABA per-tenant now |
 | `META_WEBHOOK_VERIFY_TOKEN` | Verify token the webhook GET handshake must echo |
 | `NEXT_PUBLIC_META_APP_ID` | Client-exposed Meta app ID for the Facebook JS SDK (build-time inlined) |
 | `NEXT_PUBLIC_META_CONFIG_ID` | Client-exposed Embedded Signup Configuration ID (build-time inlined; no server-side `META_CONFIG_ID` exists) |
@@ -280,11 +331,74 @@ There is no test runner installed; these two checks are the full gate.
 - Live Meta OAuth / send / delivery paths need a Meta Config ID + App Review +
   a real token (all user-supplied) and cannot be exercised end-to-end from code
   alone; verify handler shape, zod rejects, and the 400/409/500 branches.
+- The template routes (submit/sync/delete) are **no longer single-WABA**: they
+  resolve the WABA per-tenant from the signed-in user's connected verified number
+  (`resolveWabaCredentials`), not from `META_WABA_ID` / `META_ACCESS_TOKEN`. A
+  tenant with 2+ connected numbers must pass `numberId` to submit (the UI shows a
+  selector), or Meta submission returns 400 `AMBIGUOUS_NUMBER`; a tenant with none
+  connected gets 409, never a 500 and never a silent env fallback. No schema
+  change was needed — `Template.whatsappNumberId` already existed and now records
+  which WABA a template was submitted to / imported from.
+- `request.json()` can be read only once; the submit route reads both
+  `sampleValues` and `numberId` from a single `reqBody` object — adding a second
+  `await request.json()` throws "body already read".
 - `scripts/test-crypto.mjs` intentionally re-implements the crypto format inline
   (no import from `src/lib/crypto.ts`) so it runs under plain `node` with no
   compile step or new dependency.
 
 ## Change log
+
+### 2026-10-12
+- **Per-tenant migration of the three template-management routes.** Removed all
+  `META_WABA_ID` / `META_ACCESS_TOKEN` env reads from
+  `api/templates/[id]/submit`, `api/templates/sync`, and
+  `api/templates/[id]` (DELETE). They now resolve `{ wabaId, accessToken }` from
+  the signed-in tenant's own connected verified `WhatsAppNumber`.
+  - Added `resolveWabaCredentials(number)` to `src/lib/whatsapp.ts` — a sibling to
+    `resolveSendCredentials` (decrypts the row's own token; no env fallback;
+    `decrypt` may throw → caller treats it as a credential error; never logs
+    token/ciphertext). It is the single owner of template-route decrypt logic.
+  - **Mapping decision:** explicit `numberId` → `Template.whatsappNumberId`
+    binding → sole usable number → else 409 (none) / 400 `AMBIGUOUS_NUMBER` (>1).
+    Submit now accepts an optional `numberId` and binds the template to the chosen
+    number on success (additive write to the existing nullable column — no schema
+    change). Sync iterates ALL of the tenant's usable WABAs (deduped by `wabaId`),
+    binds Meta-only imports to their source number, and preserves the
+    status/category mapping, dedup, update loop, and response shape. Delete stays
+    best-effort/non-fatal (skip Meta on 0/ambiguous/decrypt-throw, always delete
+    locally).
+  - Preserved: `buildComponents`, Meta name sanitization, the 1024-char body
+    guard, and `META_TOKEN_EXPIRED` (Meta code 190) → 401 (now also applied in
+    sync). No connected number → clean 400/409 (never 500, never env fallback);
+    decrypt throw in submit/sync → clean 500 `{ error: "credential error" }`.
+  - **Frontend:** `dashboard/templates/new` and `dashboard/templates/[id]` load
+    the user's connected verified numbers and show a number selector only when the
+    tenant has 2+, passing `numberId` in the submit POST. Single-number tenants
+    are unchanged (auto-resolved server-side).
+  - **Env:** `META_WABA_ID` / `META_ACCESS_TOKEN` / `META_PHONE_NUMBER_ID` are now
+    legacy / unused by app code.
+  - **Verification:** `npm run build` (`prisma generate && next build`) → exit 0;
+    grep of the three routes shows zero `META_WABA_ID` / `META_ACCESS_TOKEN`
+    reads. No schema/column change (so no migration script was run).
+
+### 2026-10-11 (b)
+- **Removed the env credential fallback from the send path (strict per-tenant).**
+  `resolveSendCredentials` (`src/lib/whatsapp.ts`) no longer falls back to
+  `META_ACCESS_TOKEN` / `META_PHONE_NUMBER_ID`: it returns the number row's own
+  decrypted token + phone number id, or nulls. A number with no stored
+  credentials now fails to send with a clear "number not connected" error
+  (`messages/send` → failed + credit refund; `chat/.../send` → 400) instead of
+  silently sending from the shared/hardcoded env number.
+- **`.env.example`:** dropped the per-tenant vars `META_ACCESS_TOKEN`,
+  `META_PHONE_NUMBER_ID`, `META_WABA_ID` (these live encrypted per
+  `WhatsAppNumber` row now). Remaining Meta vars are app-level only:
+  `META_APP_ID`, `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN` (one app, one
+  webhook, shared by all tenants).
+- **Known gotcha / follow-up:** the template routes `api/templates/sync`,
+  `api/templates/[id]/submit`, and `api/templates/[id]` (delete) still read
+  `META_WABA_ID` / `META_ACCESS_TOKEN` from env — they are NOT yet per-tenant and
+  will only operate against the single env WABA. Making template management
+  multi-tenant is a separate pending task.
 
 ### 2026-10-11
 - **Meta Embedded Signup + per-tenant onboarding (multi-tenant SaaS).** Added two
