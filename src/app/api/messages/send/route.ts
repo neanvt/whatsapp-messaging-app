@@ -138,12 +138,13 @@ export async function POST(request: Request) {
 
       // Authentication templates carry a copy-code URL button that requires
       // the OTP code as its parameter; without it Meta returns (#131008).
-      if (template.category === "authentication" && vars.length > 0) {
+      // Keyed on variables?.[0] to mirror the early missing-OTP guard above.
+      if (template.category === "authentication" && variables?.[0]) {
         components.push({
           type: "button",
           sub_type: "url",
           index: "0",
-          parameters: [{ type: "text", text: vars[0] }],
+          parameters: [{ type: "text", text: variables[0] }],
         });
       }
 
