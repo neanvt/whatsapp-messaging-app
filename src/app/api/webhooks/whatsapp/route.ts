@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import crypto from "crypto";
 import prisma from "@/lib/db";
 
 // GET - Webhook verification challenge from Meta
@@ -20,8 +21,39 @@ export async function GET(request: Request) {
 
 // POST - Receive status updates and inbound messages from Meta
 export async function POST(request: Request) {
+  // --- Verify the payload authenticity (X-Hub-Signature-256) BEFORE parsing ---
+  // Read the raw body first so the HMAC is computed over the exact bytes Meta signed.
+  const raw = await request.text();
+
+  const appSecret = process.env.META_APP_SECRET;
+  if (!appSecret) {
+    console.error(
+      "[Webhook] Missing required env: META_APP_SECRET — rejecting payload",
+    );
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  const signatureHeader = request.headers.get("x-hub-signature-256");
+  if (!signatureHeader || !signatureHeader.startsWith("sha256=")) {
+    console.warn("[Webhook] Missing or malformed X-Hub-Signature-256");
+    return new Response("Unauthorized", { status: 401 });
+  }
+  const theirHex = signatureHeader.slice("sha256=".length);
+
+  const ourHex = crypto
+    .createHmac("sha256", appSecret)
+    .update(raw, "utf8")
+    .digest("hex");
+
+  const a = Buffer.from(theirHex, "hex");
+  const b = Buffer.from(ourHex, "hex");
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    console.warn("[Webhook] Signature verification failed");
+    return new Response("Unauthorized", { status: 401 });
+  }
+
   try {
-    const body = await request.json();
+    const body = JSON.parse(raw);
 
     // Meta sends a top-level object with an "entry" array
     const entries = body?.entry ?? [];
@@ -104,29 +136,18 @@ export async function POST(request: Request) {
             textContent = `[${msg.type}]`;
           }
 
-          // Find the WhatsApp number record by Meta phone number ID
-          const waNumber = metaPhoneNumberId
+          // Resolve the owning number STRICTLY by the inbound phone_number_id.
+          // No env fallback, no "any verified number" fallback — a payload for a
+          // tenant's phone_number_id may only ever write under that tenant.
+          const resolvedNumber = metaPhoneNumberId
             ? await prisma.whatsAppNumber.findFirst({
                 where: { phoneNumberId: metaPhoneNumberId },
               })
             : null;
 
-          // Fall back to env-configured phone number ID, then any verified number
-          const envPhoneNumberId = process.env.META_PHONE_NUMBER_ID;
-          const resolvedNumber =
-            waNumber ??
-            (envPhoneNumberId
-              ? await prisma.whatsAppNumber.findFirst({
-                  where: { phoneNumberId: envPhoneNumberId },
-                })
-              : null) ??
-            (await prisma.whatsAppNumber.findFirst({
-              where: { verificationStatus: "verified" },
-            }));
-
           if (!resolvedNumber) {
-            console.warn(
-              `[Webhook] No WhatsApp number record found at all — skipping inbound msg from ${msg.from}`,
+            console.log(
+              `[Webhook] No WhatsApp number matches phone_number_id ${metaPhoneNumberId ?? "(none)"} — skipping inbound msg from ${msg.from}`,
             );
             continue;
           }
