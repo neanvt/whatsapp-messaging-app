@@ -1,12 +1,36 @@
 {
   "verdict": "APPROVED",
+  "reviewDoc": ".agents/tasks/2026-10-11-093416-review.md",
+  "summary": "All 17 acceptance criteria verified against the actual code and runtime evidence. Build passes (prisma generate && next build, exit 0); crypto harness passes round-trip/tamper/bad-key; all 8 WhatsAppNumber columns confirmed live on Turso; webhook signature verification + strict per-tenant routing, manual validate-before-persist, cross-tenant 409 via find-then-branch, send-path regressions (OTP guard order, #131008 button, deduct/refund, superadmin exemption, decrypt-throw funneled to failed+refund), chat send rewire, fake flow removed (410 confirm, no random code), codeVerificationStatus surfaced in detail UI, and .env.example + scratchpad.md are all in place. No token/ciphertext leaks (serializeNumber everywhere). No blocking findings.",
   "findings": [
     {
-      "label": "Guard/button condition asymmetry",
-      "severity": "non-blocking",
-      "confidence": "confirmed",
-      "detail": "The missing-OTP guard tests `!variables?.[0]` (truthiness) while the button-building block tests `vars.length > 0` (presence). The gap is unreachable because the guard already rejects auth templates lacking a truthy variables[0], so the button block never runs for an auth template with an empty/falsy OTP. Optional cleanup: align both conditions on `variables?.[0]` for local clarity. Not blocking."
+      "severity": "informational",
+      "file": ".agents/tasks/features/FEAT-001.json / scripts/add-meta-onboarding-columns.mjs / prisma/schema.prisma",
+      "issue": "Schema was applied to live Turso via a standalone @libsql/client script rather than `npm run db:push` named in AC #2 / FR-1.3 / design §2, because the Prisma 5.22 CLI rejects the libsql:// datasource (P1012).",
+      "assessment": "Not a blocker. The script is additive, PRAGMA-guarded, idempotent, drops nothing, and matches the repo's established Turso DDL pattern (scripts/add-media-attachments.mjs). All 8 nullable/defaulted columns verified present on the live DB with no data loss, so AC #2's substance is met. Deviation is clearly documented in FEAT-001. No change required.",
+      "action": "None required (documented deviation)."
+    },
+    {
+      "severity": "informational",
+      "file": "src/app/api/numbers/embedded-signup/route.ts, src/app/api/numbers/manual/route.ts, src/app/api/numbers/[id]/verify/route.ts, src/app/dashboard/numbers/add/page.tsx, src/app/api/messages/send/route.ts",
+      "issue": "Live Meta round-trips (OAuth code exchange, manual token validation, FB Embedded Signup popup, health refresh, real template delivery that fixes 'sent but not received') were not exercised at runtime.",
+      "assessment": "Expected and acceptable: these require a user-supplied Config ID, App Review approval, and a real token (explicitly out of scope). The coder documented them as needs-runtime-verification across the FEAT files and did NOT claim they work from code alone, which is the correct posture.",
+      "action": "Operator must exercise the live paths after completing Meta-side setup (Config ID, App Review, META_APP_SECRET, ENCRYPTION_KEY)."
     }
   ],
-  "reviewDoc": "/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/.agents/tasks/review.md"
+  "acceptance_criteria": {
+    "1_build_passes": "PASS - prisma generate && next build compiled successfully (exit 0); DYNAMIC_SERVER_USAGE logs are pre-existing static-generation noise, not build errors.",
+    "2_schema_fields_added": "PASS (with documented method deviation) - all 8 WhatsAppNumber columns live on Turso; applied via idempotent script because Prisma CLI rejects libsql:// for db:push.",
+    "3_4_webhook_get_handshake": "PASS - GET echoes hub.challenge on verify-token match (200), 403 on mismatch; confirmed in code and FEAT-002 runtime exercise.",
+    "5_6_webhook_post_signature_and_status": "PASS - raw-body-first, app-secret-missing 401, sha256= prefix check, length guard before timingSafeEqual, 401 on mismatch with no rows; status mapping by metaMessageId preserved.",
+    "7_8_manual_validate_before_persist_no_leak": "PASS - live Meta validation before any DB write; serializeNumber strips accessToken on all responses.",
+    "9_crypto_roundtrip_tamper": "PASS - scripts/test-crypto.mjs passes all 3 assertions (round-trip, tamper-throws, bad-key-throws), exit 0.",
+    "10_11_send_resolution_and_regressions": "PASS - OTP guard precedes create/deduct; #131008 button appended; deduct/refund + superadmin exemption intact; decrypt throw funnels to failed+refund (no stuck queued).",
+    "12_chat_send": "PASS - resolveSendCredentials with missing-creds 500 before message.create.",
+    "13_isolation": "PASS - all queries scoped by session.user.id; cross-tenant collision -> 409 via find-then-branch; inbound strictly by phone_number_id under matched row's userId.",
+    "14_fake_flow_gone": "PASS - verify has no random code (health refresh only); confirm returns 410; bare POST /api/numbers returns 400.",
+    "15_env_example": "PASS - Turso + full Meta set + NEXT_PUBLIC_* + ENCRYPTION_KEY by name, no Postgres DATABASE_URL, placeholders only.",
+    "16_scratchpad": "PASS - new endpoints, schema fields, env vars, both onboarding paths, webhook signature verification, rewired sends, dated 2026-10-11 change-log entry.",
+    "17_codeVerificationStatus_ui": "PASS - detail page renders codeVerificationStatus ('Code Verification') plus verifiedName/qualityRating/platformType/connectionType and the single Refresh status button."
+  }
 }

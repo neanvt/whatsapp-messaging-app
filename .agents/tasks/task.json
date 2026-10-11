@@ -1,0 +1,7 @@
+{
+  "task_id": "task-meta-whatsapp-onboarding",
+  "task_description": "Replace the fake WhatsApp number onboarding with real Meta WhatsApp Cloud API multi-tenant onboarding: AES-256-GCM token encryption at rest, Embedded Signup (OAuth popup) + manual-credential connect paths storing real wabaId/phoneNumberId/encrypted per-tenant token, webhook X-Hub-Signature-256 verification + strict per-tenant inbound routing, both send paths rewired to per-number decrypted credentials (preserving the #131008 auth-template fix, credit deduct/refund, superadmin exemption), the real code_verification_status + Meta status fields surfaced in the UI, and updated .env.example + scratchpad.md. Design: .agents/tasks/design.md (APPROVED rev 2). Requirements: .agents/tasks/requirements.md.",
+  "status": "completed",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
+  "blocked_reason": null
+}

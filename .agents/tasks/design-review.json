@@ -1,0 +1,30 @@
+{
+  "verdict": "APPROVED",
+  "findings": [
+    {
+      "id": 1,
+      "severity": "NIT",
+      "area": "send-path narrative accuracy",
+      "location": "design.md §9.2 (src/app/api/chat/[contactPhone]/send/route.ts)",
+      "problem": "The design claims the chat-send credential guard fires 'before any row is created'. Verified: the message row is created only after the cred check, so the claim holds for the message row, but the conversation upsert runs BEFORE the credential block, so a decrypt-throw/missing-creds path still writes/updates a conversation row while returning 500. This is pre-existing behavior unchanged by the rewire (not a regression); only the sentence is imprecise.",
+      "fix": "Reword §9.2 to 'no message row is created before the guard; the conversation upsert already runs earlier and is unchanged by this rewire', OR move the resolveSendCredentials try/catch wrap above the conversation upsert so a credential failure returns 500 before any DB write."
+    },
+    {
+      "id": 2,
+      "severity": "NIT",
+      "area": "manual-path token expiry",
+      "location": "design.md §5.2 step 4 / §5.1",
+      "problem": "Manual path hardcodes tokenExpiresAt: null and does not introspect expiry, so a pasted short-lived user token will silently stop working later with no UI signal. Mitigated by §5.1 helper text recommending a System User token.",
+      "fix": "Keep the behavior but document the gotcha in §5.2 and scratchpad.md: 'a temporary token stored manually will stop working at Meta's expiry; no proactive expiry tracking', consistent with the out-of-scope token-refresh decision."
+    },
+    {
+      "id": 3,
+      "severity": "NIT",
+      "area": "env-var documentation vs acceptance criterion",
+      "location": "design.md §10.1 / §15 note; requirements AC #15",
+      "problem": "AC #15 literally names META_CONFIG_ID in .env.example; the design intentionally keeps only NEXT_PUBLIC_META_CONFIG_ID (config id is read solely by FB.login in the browser). Defensible placement, but diverges from the literal AC text.",
+      "fix": "Leave as designed; ensure .env.example/scratchpad.md state explicitly that the Embedded Signup Configuration ID lives as NEXT_PUBLIC_META_CONFIG_ID and that this satisfies AC #15's intent, so no later reader re-adds a dead server mirror."
+    }
+  ],
+  "reviewDoc": "/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/.agents/tasks/design-review.md"
+}
