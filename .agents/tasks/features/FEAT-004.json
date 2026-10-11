@@ -1,0 +1,23 @@
+{
+  "id": "FEAT-004",
+  "type": "docs",
+  "description": "Documentation + regression gate: rewrite .env.example (remove Postgres DATABASE_URL; add Turso + full Meta set + NEXT_PUBLIC_* + ENCRYPTION_KEY, placeholders only) and update scratchpad.md (new endpoints, schema fields, env vars, two onboarding paths, webhook signature verification, rewired send paths, dated change-log entry). Depends on FEAT-001/002/003 being in place so the docs reflect the real final state.",
+  "status": "completed",
+  "steps": [
+    "Rewrite .env.example per design §10.1 with placeholders only (NO real secrets): remove the Postgres DATABASE_URL; add TURSO_DATABASE_URL, TURSO_AUTH_TOKEN; NEXTAUTH_URL, NEXTAUTH_SECRET, NEXTAUTH_JWT_SECRET; the full Meta set META_APP_ID, META_APP_SECRET, META_ACCESS_TOKEN (legacy/global fallback), META_PHONE_NUMBER_ID (legacy/global fallback), META_WABA_ID, META_WEBHOOK_VERIFY_TOKEN; NEXT_PUBLIC_META_APP_ID and NEXT_PUBLIC_META_CONFIG_ID (note: build-time-inlined; there is NO server META_CONFIG_ID); ENCRYPTION_KEY (comment: AES-256-GCM 32 raw bytes base64, generate with `openssl rand -base64 32`); Razorpay keys (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET). Include a comment block summarizing the Meta-side prerequisites from design §10.2 (Config ID + App Review user-supplied; META_APP_SECRET mandatory for delivery status; NEXT_PUBLIC_* rebuild requirement).",
+    "Update scratchpad.md (repo root): refresh the `Last updated: YYYY-MM-DD` line to today; document the two onboarding paths (Embedded Signup + manual); add the new/changed endpoints (POST /api/numbers/embedded-signup, POST /api/numbers/manual, repurposed POST /api/numbers/[id]/verify health refresh, neutralized POST /api/numbers/[id]/confirm -> 410, bare POST /api/numbers now 400); the new WhatsAppNumber fields (accessToken ciphertext, tokenExpiresAt, displayPhoneNumber, verifiedName, qualityRating, codeVerificationStatus, platformType, connectionType); the new env vars (ENCRYPTION_KEY, NEXT_PUBLIC_META_APP_ID, NEXT_PUBLIC_META_CONFIG_ID, Turso vars); webhook X-Hub-Signature-256 verification + strict per-tenant inbound routing; the two rewired send paths using per-number decrypted credentials. Prepend a dated change-log entry (newest first) summarizing this change. Reference secrets by key name only — never real values.",
+    "Run the full regression gate and clean up any temporary verification artifacts (do not leave stray files)."
+  ],
+  "acceptance_criteria": [
+    ".env.example contains Turso vars + the full Meta set + NEXT_PUBLIC_META_APP_ID + NEXT_PUBLIC_META_CONFIG_ID + ENCRYPTION_KEY by name, and no Postgres DATABASE_URL, with placeholders only (AC #15).",
+    "scratchpad.md is updated with the new endpoints, schema fields, env vars, onboarding paths, webhook signature verification, rewired send paths, a refreshed Last updated date, and a dated change-log entry (AC #16).",
+    "`npm run build` still passes and `ENCRYPTION_KEY=$(openssl rand -base64 32) node scripts/test-crypto.mjs` still passes; no temporary files remain (AC #1, #9)."
+  ],
+  "verification": [
+    "npm run build",
+    "ENCRYPTION_KEY=$(openssl rand -base64 32) node scripts/test-crypto.mjs",
+    "Open .env.example and scratchpad.md and confirm the required keys/sections are present by name, no Postgres DATABASE_URL remains, and no real secret values appear."
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
