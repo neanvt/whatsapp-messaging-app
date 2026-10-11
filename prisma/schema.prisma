@@ -51,6 +51,14 @@ model WhatsAppNumber {
   verificationStatus     String    @default("pending") // pending, in_progress, verified, failed
   verificationCode      String?
   verifiedAt            DateTime?
+  accessToken           String?   // AES-256-GCM ciphertext at rest — never stored plaintext, never logged
+  tokenExpiresAt        DateTime?
+  displayPhoneNumber    String?
+  verifiedName          String?
+  qualityRating         String?
+  codeVerificationStatus String?
+  platformType          String?
+  connectionType        String    @default("manual")
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
