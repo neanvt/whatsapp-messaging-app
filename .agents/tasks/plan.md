@@ -1,230 +1,212 @@
-# Implementation Plan — Meta WhatsApp Cloud API Multi-Tenant Onboarding
+# Implementation Plan — Per-Tenant Credentials for Template-Management Routes
 
-Source of truth: `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/.agents/tasks/design.md`
-(APPROVED, revision 2) and `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/.agents/tasks/requirements.md`.
+Source design: `.agents/tasks/design.md` (Status: Design revision 2, APPROVED).
+Requirements: `.agents/tasks/requirements.md`.
+Repo: `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp`.
 
-All paths are absolute under `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp`.
-Zero new npm dependencies (Node `crypto` built-in, FB SDK via browser `<script>`,
-zod + Prisma already present). Graph API version is `v19.0` everywhere. DB changes
-apply via `npm run db:push` (NOT migrations). Build command: `npm run build`
-(`prisma generate && next build`).
+## Context (verified against live code)
 
-Verified codebase facts (confirmed by reading the actual files):
-- Webhook already exists at `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/src/app/api/webhooks/whatsapp/route.ts`
-  — GET handshake works; POST has NO `X-Hub-Signature-256` verification and uses an
-  env + "any verified number" inbound fallback that can misattribute tenants.
-- `src/app/api/messages/send/route.ts` structure confirmed: auth guard → number
-  (`verificationStatus: "verified"`) + template (`status: "approved"`) checks → auth-template
-  OTP guard (`category === "authentication" && !variables?.[0]` → 400) BEFORE
-  `message.create` and credit deduct → superadmin exemption (`session.user.role === "superadmin"`)
-  → `message.create` (status `queued`) → deduct credit → inline creds
-  `number.phoneNumberId ?? process.env.META_PHONE_NUMBER_ID` and
-  `process.env.META_ACCESS_TOKEN` → `#131008` fix appends `{ type:"button", sub_type:"url",
-  index:"0", parameters:[{type:"text",text:vars[0]}] }` → `message.update` with
-  `metaMessageId`/`status`/`errorMessage` → on `failed` refund credit (non-superadmin) + 500.
-- `src/app/api/chat/[contactPhone]/send/route.ts`: no credit logic, no pre-created row;
-  same inline env fallback; missing creds → 500 "Meta API credentials not configured";
-  Meta failure → 422.
-- `Message` model has `metaMessageId`, `status`, `deliveredAt`, `readAt`, `errorMessage`.
-- `WhatsAppNumber` unique key is `phoneNumber` only (no compound unique).
-- `src/lib/db.ts` default-exports `prisma`; `src/lib/auth.ts` named-exports `authOptions`.
-- `import crypto from "crypto"` pattern already used in `src/app/api/payments/verify/route.ts`.
-- Numbers list `src/app/dashboard/numbers/page.tsx` fetches `/api/numbers` and DELETEs
-  `/api/numbers/[id]`; "Add Number" links to `/dashboard/numbers/add` whose page POSTs
-  `/api/numbers` with a bare `phoneNumber`.
-- No `.kiro/steering/*`, AGENTS.md, or CONTRIBUTING found; `scratchpad.md` exists at repo root.
+- Build command: `npm run build` (= `prisma generate && next build`). The repo has
+  **no test runner**; verification is the production build (type-check + lint via
+  `next build`) plus targeted grep/credential-path walkthrough per the design.
+  Baseline `npm run build` is currently **green** (verified before planning).
+- `src/lib/whatsapp.ts` already exports `resolveSendCredentials(number)` — the exact
+  pattern to mirror for the new WABA resolver. `decrypt` is already imported there.
+- `src/lib/crypto.ts` `decrypt()` throws `"Invalid ciphertext format"` on malformed
+  input and throws (via `decipher.final`) on tampered ciphertext / bad key; it never
+  logs its inputs. The resolver must not add logging.
+- `prisma/schema.prisma`: `Template.whatsappNumberId String?` + `whatsappNumber`
+  relation **already exist**; `WhatsAppNumber` already has `wabaId`, `phoneNumberId`,
+  `accessToken` (ciphertext), `verificationStatus`. **No schema change is required.**
+- Env reads to remove (confirmed by grep):
+  - `src/app/api/templates/sync/route.ts` lines ~36-37 (`const wabaId/accessToken = process.env...`) and the `!wabaId || !accessToken` 500 guard.
+  - `src/app/api/templates/[id]/submit/route.ts` lines ~111-112 and its 500 guard.
+  - `src/app/api/templates/[id]/route.ts` lines ~144-151 (DELETE guard + fetch).
+- Frontend submit callers that POST to `/api/templates/[id]/submit` with
+  `{ sampleValues }` (no `numberId`): `src/app/dashboard/templates/new/page.tsx`
+  (`handleSubmit`) and `src/app/dashboard/templates/[id]/page.tsx`
+  (`handleSaveAndSubmit`).
 
-> Note on user-reported issues: do NOT dismiss any reported symptom as "already working"
-> from code reading alone. Where runtime verification is not possible in this environment
-> (live Meta calls, real delivery), the item is marked **needs runtime verification** and
-> the coder must verify in-context during implementation.
+## Schema migration decision
+
+**No schema change / no migration script is required.** `Template.whatsappNumberId`
+already exists; submit/sync write it, delete reads it. (Design §8.) This is recorded
+explicitly so the implementer does NOT create a `scripts/*.mjs` migration or run
+`prisma db push` (which fails against `libsql://` with P1012 in this repo).
 
 ---
 
-- [ ] 1. Extend the `WhatsAppNumber` model with the new nullable Meta-onboarding fields and apply to the live Turso DB.
-      Add: `accessToken String?` (AES-256-GCM ciphertext at rest — never plaintext/logged),
-      `tokenExpiresAt DateTime?`, `displayPhoneNumber String?`, `verifiedName String?`,
-      `qualityRating String?`, `codeVerificationStatus String?`, `platformType String?`,
-      `connectionType String @default("manual")`. All additive/nullable; keep `verificationCode`.
-      Files: `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/prisma/schema.prisma`
-      Verify: `npm run db:push` succeeds against the live Turso DB with no data loss, then
-      `npm run build` (`prisma generate && next build`) passes. (AC #1, #2 — **needs runtime verification** against live Turso)
+# Implementation Plan
 
-- [ ] 2. Create the AES-256-GCM crypto utility.
-      `src/lib/crypto.ts` exporting `encrypt(plaintext): string` → `base64(iv).base64(tag).base64(ciphertext)`
-      and `decrypt(payload): string`. Lazy private `getKey()` reads `process.env.ENCRYPTION_KEY`,
-      base64-decodes, asserts exactly 32 bytes else throws
-      `Error("ENCRYPTION_KEY is missing or not a 32-byte base64 key")`. 12-byte random IV per
-      encrypt. `decrypt` splits on `.`; !== 3 segments → `Error("Invalid ciphertext format")`;
-      GCM tag check in `final()` throws on tamper. Module NEVER logs. Also add the plain
-      `scripts/test-crypto.mjs` harness (inline AES-256-GCM, same format, no import from TS,
-      no new dep) asserting round-trip, tamper-throws, and absent/short-key-throws.
-      Files: `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/src/lib/crypto.ts`,
-      `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/scripts/test-crypto.mjs`
-      Verify: `ENCRYPTION_KEY=$(openssl rand -base64 32) node scripts/test-crypto.mjs` prints
-      pass for all three assertions and exits 0; `npm run build` passes. (AC #9)
+- [ ] 1. Add the `resolveWabaCredentials` resolver to `src/lib/whatsapp.ts`.
+      Add one exported, pure, synchronous function immediately after
+      `resolveSendCredentials`, mirroring its shape (design §3.2). Signature:
+      `resolveWabaCredentials(number: { wabaId: string | null; accessToken: string | null }): { wabaId: string | null; accessToken: string | null }`.
+      Return `{ wabaId: number.wabaId, accessToken: decrypt(number.accessToken) }`
+      only when BOTH `wabaId` and `accessToken` are non-null; otherwise return
+      `{ wabaId: null, accessToken: null }`. No `console.*`, no `prisma`, no
+      `session`. `decrypt` is already imported — do not re-import. Add a short
+      comment matching the `resolveSendCredentials` doc style (no env fallback;
+      decrypt may throw; callers treat a throw as a credential error; never log the
+      token/ciphertext).
+      Files: `src/lib/whatsapp.ts`
+      Verify: `npm run build` compiles clean (the resolver is referenced by the
+      routes in later items; until then it is an unused export, which still
+      type-checks). (AC-1.)
 
-- [ ] 3. Create the shared WhatsApp helper module.
-      `src/lib/whatsapp.ts` exporting: `normalizePhone(s)` → `s.replace(/\D/g,"")`;
-      `serializeNumber(number)` → number row with `accessToken` removed; `resolveSendCredentials(number)`
-      → if `number.accessToken` non-null return `{ phoneNumberId: number.phoneNumberId,
-      accessToken: decrypt(number.accessToken) }` (may throw), else env fallback
-      `{ phoneNumberId: number.phoneNumberId ?? process.env.META_PHONE_NUMBER_ID,
-      accessToken: process.env.META_ACCESS_TOKEN }`; `NumberOwnedByOtherTenantError` class;
-      `upsertNumberForUser({ userId, phoneNumber, data })` using find-then-branch (findUnique on
-      `phoneNumber` → if existing.userId !== userId throw NumberOwnedByOtherTenantError → else
-      update by `existing.id` → else create, catching Prisma P2002 → throw NumberOwnedByOtherTenantError).
-      NOT a Prisma `upsert`. Import `prisma` default from `@/lib/db`, `decrypt` from `@/lib/crypto`,
-      and `Prisma` from `@prisma/client`.
-      Files: `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/src/lib/whatsapp.ts`
-      Verify: `npm run build` passes (type-checks the new exports and Prisma types). (supports AC #8, #10)
+- [ ] 2. Migrate the submit route to per-tenant credentials with optional `numberId`.
+      File `src/app/api/templates/[id]/submit/route.ts`. Follow design §5 exactly.
+      - Add `import { resolveWabaCredentials } from "@/lib/whatsapp";`.
+      - Keep auth guard, scoped `findFirst({ where: { id: params.id, userId: session.user.id } })`,
+        404, and the `draft`/`rejected` status gate UNCHANGED.
+      - In the EXISTING single `request.json()` try/catch, read BOTH `sampleValues`
+        (unchanged) AND `numberId` from the same `reqBody` object (do NOT add a
+        second `await request.json()` — it throws "body already read"). Set
+        `numberId = typeof reqBody?.numberId === "string" && reqBody.numberId.length > 0 ? reqBody.numberId : undefined`.
+      - Keep the 1024-char body guard UNCHANGED and BEFORE credential resolution.
+      - Replace the `process.env.META_WABA_ID/ACCESS_TOKEN` block (and its 500
+        "credentials not configured" guard) with number resolution per §4.3
+        precedence, each lookup `prisma.whatsAppNumber.findFirst/findMany` scoped by
+        `userId: session.user.id`, `verificationStatus: "verified"`,
+        `wabaId: { not: null }`, `accessToken: { not: null }`:
+        1. If `numberId` provided and the scoped `findFirst` returns nothing →
+           400 `{ error: "Selected WhatsApp number is not connected", code: "NUMBER_NOT_CONNECTED" }`.
+        2. Else if `template.whatsappNumberId` set: scoped `findFirst` on it; if not
+           usable, FALL THROUGH to step 3 (stale binding).
+        3. Else `findMany`: 0 → 409 `{ error: "Connect a WhatsApp number before managing templates" }`;
+           exactly 1 → use it; >1 → 400 `{ error: "Multiple WhatsApp numbers connected — specify which number to submit this template from", code: "AMBIGUOUS_NUMBER" }`.
+      - Resolve creds in a try/catch:
+        `try { ({ wabaId, accessToken } = resolveWabaCredentials(number)); } catch { console.error("[Template submit] credential resolution failed (encryption/config)"); return 500 { error: "credential error" }; }`.
+        Keep a defensive null guard → 409 (unreachable but consistent). Do NOT log
+        token/ciphertext.
+      - Keep Meta name sanitization, `buildComponents`, the
+        `POST .../v19.0/${wabaId}/message_templates` call shape with
+        `Authorization: Bearer ${accessToken}`, and the `META_TOKEN_EXPIRED`
+        (code 190 / "Session has expired") 401 branch + the other-error 400 branch
+        BYTE-FOR-BYTE unchanged — only the source of `wabaId`/`accessToken` changes.
+      - In the success write-back, keep `status: "submitted"`, `metaTemplateId`,
+        `submittedAt`, and ADD `...(template.whatsappNumberId ? {} : { whatsappNumberId: resolvedNumberId })`
+        where `resolvedNumberId` is the chosen number's `id` (design §4.4).
+      Files: `src/app/api/templates/[id]/submit/route.ts`
+      Verify: `npm run build` compiles clean. Confirm `process.env.META_WABA_ID` and
+      `process.env.META_ACCESS_TOKEN` no longer appear in this file (grep in item 6).
+      (AC-2, AC-5, AC-6, AC-7, AC-8, AC-10.)
 
-- [ ] 4. Add the Embedded Signup backend endpoint (Path A).
-      New `POST` handler at `src/app/api/numbers/embedded-signup/route.ts`. Auth-guard with
-      `getServerSession(authOptions)` (401 without `session.user.id`); scope all writes to
-      `session.user.id`. zod body `{ code: string(1..4000), phoneNumberId?: string(1..100),
-      wabaId?: string(1..100) }`. Steps per design §4.2: require `META_APP_ID`+`META_APP_SECRET`
-      (else 500); exchange code (no redirect_uri) for business token + `expires_in`→`tokenExpiresAt`;
-      resolve `wabaId` (client value first, else `debug_token` defensive
-      `data?.data?.granular_scopes ?? []` → `whatsapp_business_management` → `target_ids?.[0]`,
-      else terminal 400); discover `phoneNumberId` via `GET /v19.0/{wabaId}/phone_numbers` if absent;
-      fetch health `GET /v19.0/{phoneNumberId}?fields=display_phone_number,verified_name,quality_rating,code_verification_status,platform_type,status`;
-      `POST /v19.0/{wabaId}/subscribed_apps` (non-fatal); `POST /v19.0/{phoneNumberId}/register`
-      with random 6-digit pin (advisory only — already-registered via numeric `error.code === 133016`,
-      never message text; never fails onboarding); guard empty `display_phone_number` → 400;
-      `normalizePhone` → `encrypt(businessToken)` → `upsertNumberForUser(...)` with
-      `connectionType:"embedded_signup"`, `verificationStatus:"verified"`, `verifiedAt:new Date()`;
-      map `NumberOwnedByOtherTenantError` → 409; respond `serializeNumber(...)` (no token).
-      Use `fetch` to Graph `v19.0`. Never log tokens.
-      Files: `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/src/app/api/numbers/embedded-signup/route.ts`
-      Verify: `npm run build` passes. Live OAuth exchange is **needs runtime verification** (requires
-      Meta Config ID + App Review, user-supplied); coder confirms handler shape, zod rejects,
-      and 409/400 branches by reading the compiled route. (FR-3, AC #8 shape)
+- [ ] 3. Migrate the sync route to iterate the tenant's usable WABAs.
+      File `src/app/api/templates/sync/route.ts`. Follow design §6 exactly.
+      - Add `import { resolveWabaCredentials } from "@/lib/whatsapp";` (keep the
+        existing `import type { Prisma }`).
+      - Keep the auth guard. Replace the `process.env` block + its 500 guard with:
+        `findMany` of usable numbers scoped by `userId: session.user.id`,
+        `verificationStatus: "verified"`, `wabaId: { not: null }`,
+        `accessToken: { not: null }`. If `numbers.length === 0` → 409
+        `{ error: "Connect a WhatsApp number before managing templates" }`.
+      - Build `const wabaMap = new Map<string, { numberId: string; accessToken: string }>();`
+        First-number-per-`wabaId` wins. For each number, resolve creds in try/catch:
+        a decrypt throw → `console.error("[Template sync] credential resolution failed (encryption/config)")` and return 500 `{ error: "credential error" }`;
+        a null-creds result → defensive `continue`. After the loop, if
+        `wabaMap.size === 0` → 409 (same message).
+      - Replace the single-fetch block: declare `type MetaTemplate` widened to
+        include `__sourceNumberId: string` and `const metaTemplates: MetaTemplate[] = [];`
+        (NOT `= metaData.data ?? []`). For each `[wabaId, { numberId, accessToken }]`
+        in `wabaMap`, run the existing
+        `GET .../v19.0/${wabaId}/message_templates?fields=...&limit=250&access_token=${accessToken}`
+        fetch, and push each result as `{ ...t, __sourceNumberId: numberId }`
+        (cast per-fetch results to `Omit<MetaTemplate, "__sourceNumberId">[]`).
+        Per-fetch `!metaRes.ok`: detect token-expired (code 190 / "Session has
+        expired") → return 401 `{ error, code: "META_TOKEN_EXPIRED" }`; other
+        non-ok → return 400 with the Meta message (as today). Sync aborts on the
+        first failing WABA.
+      - Leave ALL downstream logic UNCHANGED: `mapMetaStatus`, `sanitize`,
+        `byId`/`byName` maps, the per-user `findMany` of locals, dedup `deleteMany`,
+        the update loop, and the response shape `{ synced, updated, imported, duplicatesRemoved }`.
+        The `console.log(metaTemplates.map(...))` and `byId`/`byName` are transparent
+        to the widened element type.
+      - In the Meta-only import `create`, ADD `whatsappNumberId: meta.__sourceNumberId`
+        (the `create` keeps `satisfies Prisma.TemplateUncheckedCreateInput`). Do NOT
+        rebind already-local templates in the update loop.
+      Files: `src/app/api/templates/sync/route.ts`
+      Verify: `npm run build` compiles clean (watch the `MetaTemplate` type — the
+      widened element type must satisfy the `byId`/`byName`/update-loop reads and the
+      import `create`). Confirm no `process.env.META_WABA_ID`/`META_ACCESS_TOKEN`
+      remain (grep in item 6). (AC-3, AC-5, AC-6, AC-7, AC-8, AC-10.)
 
-- [ ] 5. Add the manual-credential backend endpoint (Path B).
-      New `POST` handler at `src/app/api/numbers/manual/route.ts`. Auth-guard + scope to
-      `session.user.id`. zod body `{ wabaId: string(1..100), phoneNumberId: string(1..100),
-      accessToken: string(10..5000), label?: string(0..100) }`. Steps per design §5.2:
-      validate live `GET /v19.0/{phoneNumberId}?fields=...` with provided token — non-OK → 400 with
-      Meta's `error.message`, NOTHING saved; three-way WABA tie-check via
-      `GET /v19.0/{wabaId}/phone_numbers` (list-OK-and-present → proceed; list-OK-and-absent → fatal
-      400 nothing saved; list-call-failed → non-fatal warn); `subscribed_apps` non-fatal; empty
-      `display_phone_number` guard → 400; `encrypt(providedToken)` + `upsertNumberForUser(...)` with
-      `connectionType:"manual"`, `tokenExpiresAt:null`, `verificationStatus:"verified"`,
-      `verifiedAt:new Date()`; `NumberOwnedByOtherTenantError` → 409; respond `serializeNumber(...)`.
-      Never log the token; never echo it back.
-      Files: `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/src/app/api/numbers/manual/route.ts`
-      Verify: `npm run build` passes. Coder confirms: invalid-creds path returns 400 and creates no
-      row (inspect handler ordering — validate-before-persist), response omits token. Live Meta
-      validation is **needs runtime verification** with real/sandbox creds. (FR-4, AC #7, #8)
+- [ ] 4. Migrate the delete route's best-effort Meta call to per-tenant credentials.
+      File `src/app/api/templates/[id]/route.ts` — **DELETE handler only** (leave
+      GET and PUT untouched). Follow design §7 exactly.
+      - Add `import { resolveWabaCredentials } from "@/lib/whatsapp";`.
+      - Keep auth, scoped `findFirst`, and 404. Replace the
+        `template.metaTemplateId && process.env.META_WABA_ID && process.env.META_ACCESS_TOKEN`
+        guard: only attempt Meta delete when `template.metaTemplateId` is set. Resolve
+        the number from `template.whatsappNumberId` (scoped `findFirst` by `userId`,
+        verified, non-null `wabaId`/`accessToken`) if set+usable; else the user's
+        single usable number (scoped `findMany`, use only when exactly 1); else SKIP
+        the Meta delete (log `"[Template delete] no connected number — skipping Meta delete"`, no token).
+      - If a number resolves, resolve creds in try/catch; on throw
+        `console.warn("[Template delete] credential error — skipping Meta delete")`
+        and fall through (do NOT 500). Only when `wabaId && accessToken` are present,
+        issue the existing
+        `DELETE .../v19.0/${wabaId}/message_templates?hsm_id=${template.metaTemplateId}&name=${template.name}`
+        with `Authorization: Bearer ${accessToken}` and the existing
+        `.catch((e) => console.warn("Meta delete warning:", e))`.
+      - LEAVE `template.name` interpolated UNENCODED (design §7 scope note — carried
+        forward verbatim, not a regression, out of scope to "clean up").
+      - `await prisma.template.delete({ where: { id: params.id } })` ALWAYS runs after
+        the best-effort Meta step. Response and outer catch unchanged. Do NOT surface
+        `META_TOKEN_EXPIRED` here (best-effort/non-fatal, design §7.1).
+      Files: `src/app/api/templates/[id]/route.ts`
+      Verify: `npm run build` compiles clean. Confirm no `process.env.META_WABA_ID`/
+      `META_ACCESS_TOKEN` remain in this file (grep in item 6). (AC-4, AC-5, AC-7,
+      AC-10.)
 
-- [ ] 6. Add `X-Hub-Signature-256` verification and tighten multi-tenant inbound routing in the existing webhook.
-      Modify `src/app/api/webhooks/whatsapp/route.ts`. Keep GET handshake unchanged. POST: read raw
-      body with `await request.text()` BEFORE parsing, then `JSON.parse`. Verify signature per design
-      §8: `META_APP_SECRET` unset → 401 + `console.error` naming the key; header missing / no
-      `sha256=` prefix → 401; compute `crypto.createHmac("sha256", secret).update(raw,"utf8").digest("hex")`;
-      length-guard both hex buffers before `crypto.timingSafeEqual` (throws on length mismatch) → 401;
-      mismatch → 401 (payload NOT processed). After valid signature: keep status mapping
-      (`updateMany where metaMessageId` → `status`/`deliveredAt`/`readAt`/`errorMessage`); for inbound,
-      resolve owner STRICTLY by `value.metadata.phone_number_id` (`findFirst where phoneNumberId`),
-      write under that row's real `userId`; NO match → `console.log` + skip. REMOVE the env +
-      "any verified number" fallback entirely. Post-signature processing errors still return 200.
-      Never log the secret/HMAC/tokens. `import crypto from "crypto"`.
-      Files: `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/src/app/api/webhooks/whatsapp/route.ts`
-      Verify: `npm run build` passes. GET handshake: `curl` with `hub.mode=subscribe` + matching
-      verify token → exact challenge/200; wrong token → 403. POST: craft a payload, sign with
-      `openssl`/node HMAC over the raw body using a test secret → matching `Message` updated by
-      `metaMessageId`; missing/invalid signature → 401 and no rows created. (AC #3, #4, #5, #6, #13 —
-      **needs runtime verification** for POST signed payload; coder exercises with a local test secret)
+- [ ] 5. (Additive, recommended) Let the submit UI pass an optional `numberId` to
+      unblock multi-number tenants. Design §4.5 marks this optional/additive — single-
+      number tenants keep working with no change because the backend auto-resolves the
+      sole number. Implement a minimal selector: load the user's connected verified
+      numbers (reuse the existing numbers API the dashboard already uses), and when
+      there is more than one, let the user pick; include `numberId` in the POST body
+      of the submit `fetch` in `src/app/dashboard/templates/[id]/page.tsx`
+      (`handleSaveAndSubmit`) and `src/app/dashboard/templates/new/page.tsx`
+      (`handleSubmit`), alongside the existing `sampleValues`. When exactly one number
+      exists, default to it and omit the selector. Surface the backend
+      `AMBIGUOUS_NUMBER` / `NUMBER_NOT_CONNECTED` / 409 "Connect a WhatsApp number"
+      errors in the existing error UI. If scope/time is constrained, this item MAY be
+      reduced to only wiring `numberId` into the POST body (no selector) without
+      breaking single-number tenants — but prefer the selector so multi-number tenants
+      are not dead-ended on a 400.
+      Files: `src/app/dashboard/templates/[id]/page.tsx`,
+      `src/app/dashboard/templates/new/page.tsx`
+      Verify: `npm run build` compiles clean; the two pages still render (no new
+      type/lint errors). Single-number flow sends no `numberId` or the sole id, and
+      submit still succeeds end-to-end for a one-number tenant.
 
-- [ ] 7. Rewire `messages/send` to per-number decrypted credentials while preserving all existing behavior.
-      Modify `src/app/api/messages/send/route.ts`. Replace the inline
-      `number.phoneNumberId ?? process.env.META_PHONE_NUMBER_ID` / `process.env.META_ACCESS_TOKEN`
-      assignment with a try/catch around `resolveSendCredentials(number)` (import from `@/lib/whatsapp`);
-      on throw set both `phoneNumberId`/`accessToken` to `null` and `console.error` without the token,
-      so the pre-existing `if (!phoneNumberId || !accessToken)` branch sets `finalStatus="failed"` and
-      the end-of-handler refund runs. PRESERVE EXACTLY: auth guard, number `verified` + template
-      `approved` checks, auth-template OTP guard before any row/credit, the `#131008` button component,
-      credit deduct on send / refund on failure, superadmin exemption, `message.create`→`update` with
-      `metaMessageId`/`status`/`errorMessage`, Graph `v19.0`, `to` digit-stripping, response shapes.
-      Files: `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/src/app/api/messages/send/route.ts`
-      Verify: `npm run build` passes. Coder confirms by re-reading the diff that the OTP guard still
-      precedes `message.create`, the button block + deduct/refund + superadmin exemption are unchanged,
-      and the decrypt-throw funnels into the failed+refund branch. (FR-6, AC #10, #11 — **needs runtime
-      verification** for a live send; this fixes the user's "sent but not received" via per-tenant creds)
+- [ ] 6. Verify env reads are gone and walk the credential paths (no code change).
+      Verify (run each; all must hold):
+      - `npm run build` → exit 0, clean type-check/lint.
+      - grep the three routes for leftover env reads and expect ZERO matches:
+        `grep -nE "META_WABA_ID|META_ACCESS_TOKEN" src/app/api/templates/[id]/submit/route.ts src/app/api/templates/sync/route.ts "src/app/api/templates/[id]/route.ts"`
+        (AC-10 #17).
+      - Per-route credential-path walkthrough against the design error-contract tables
+        (§5.1 submit, §6.4 sync, §7.2 delete): confirm by reading the final code that
+        each branch returns the specified status/body and that no `console.*` emits a
+        token or ciphertext — submit (401/404/400 status gate/400 >1024/400
+        NUMBER_NOT_CONNECTED/409 zero/400 AMBIGUOUS_NUMBER/500 credential error/401
+        META_TOKEN_EXPIRED/200), sync (401/409/500 credential error/401
+        META_TOKEN_EXPIRED/400 other/200), delete (401/404/200 with Meta skipped on 0
+        or ambiguous or decrypt-throw/200 success, local delete always runs).
+      - (Optional, non-billable) read-only Graph GET to confirm call shape only, e.g.
+        `curl -s "https://graph.facebook.com/v19.0/{WABA_ID}/message_templates?fields=id,name,status&limit=1&access_token={TOKEN}"`
+        using a real connected tenant's decrypted creds in a scratch shell (never
+        commit the token; this is a shape check, not a required gate).
 
-- [ ] 8. Rewire `chat/[contactPhone]/send` to per-number decrypted credentials.
-      Modify `src/app/api/chat/[contactPhone]/send/route.ts`. Replace the inline env fallback with a
-      try/catch around `resolveSendCredentials(waNumber)`; on throw leave both `null` so the existing
-      `if (!phoneNumberId || !accessToken) return 500 "Meta API credentials not configured"` fires
-      BEFORE any `message.create`. Preserve the conversation upsert, free-text payload, `message.create`,
-      422-on-Meta-failure and 500-on-missing-creds shapes, Graph `v19.0`.
-      Files: `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/src/app/api/chat/[contactPhone]/send/route.ts`
-      Verify: `npm run build` passes; coder confirms the missing-creds 500 still precedes row creation. (FR-6.3, AC #12)
-
-- [ ] 9. Repurpose/neutralize the fake verify/confirm/bare-POST endpoints and `serializeNumber` the number reads.
-      - `src/app/api/numbers/[id]/verify/route.ts`: remove random-code generation; make it a real health
-        refresh — if the number has a stored token, `GET /v19.0/{phoneNumberId}?fields=...` and update
-        `displayPhoneNumber`/`verifiedName`/`qualityRating`/`codeVerificationStatus`/`platformType`;
-        no token (legacy) → 400 "Reconnect this number via Connect WhatsApp". Return `serializeNumber`.
-      - `src/app/api/numbers/[id]/confirm/route.ts`: neutralize → 410 Gone
-        "Manual code confirmation is no longer supported. Connect via Embedded Signup or manual credentials."
-      - `src/app/api/numbers/route.ts`: keep `GET` (return `serializeNumber` for each row); change `POST`
-        so a bare `phoneNumber` is rejected with 400 directing to the two real paths (no usable number minted).
-      - `src/app/api/numbers/[id]/route.ts`: `GET` returns `serializeNumber(number)`; keep DELETE.
-      Files: `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/src/app/api/numbers/[id]/verify/route.ts`,
-      `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/src/app/api/numbers/[id]/confirm/route.ts`,
-      `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/src/app/api/numbers/route.ts`,
-      `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/src/app/api/numbers/[id]/route.ts`
-      Verify: `npm run build` passes; coder confirms `confirm` cannot mark `verified` from a local code
-      and `verify` generates no random code. (FR-5, AC #14; token never leaves server via `serializeNumber`)
-
-- [ ] 10. Replace the frontend fake-code flow with the two real Connect paths and surface real Meta statuses.
-      - `src/app/dashboard/numbers/add/page.tsx`: becomes Connect page — "Connect WhatsApp" button loading
-        the FB JS SDK once (`https://connect.facebook.net/en_US/sdk.js`), `FB.init({ appId:
-        process.env.NEXT_PUBLIC_META_APP_ID, version:"v19.0", ... })`, a `message` listener (origin-guarded
-        to facebook.com) capturing `WA_EMBEDDED_SIGNUP` `phone_number_id`/`waba_id`, `FB.login` with
-        `config_id: process.env.NEXT_PUBLIC_META_CONFIG_ID`, `response_type:"code"`,
-        `override_default_response_type:true`, posting `{ code, phoneNumberId?, wabaId? }` to
-        `/api/numbers/embedded-signup`; plus an "Enter credentials manually" toggle with a form (WABA ID,
-        Phone Number ID, Access Token, optional label) posting to `/api/numbers/manual`, showing Meta's
-        exact 400 message. Remove the phone-string form.
-      - `src/app/dashboard/numbers/[id]/verify/page.tsx`: delete the OTP/dev-code UI; make it a pure client
-        redirect to `/dashboard/numbers/[id]`.
-      - `src/app/dashboard/numbers/page.tsx`: keep list + DELETE; render `connectionType`/real statuses in badges.
-      - `src/app/dashboard/numbers/[id]/page.tsx`: surface `displayPhoneNumber`, `verifiedName`,
-        `qualityRating`, `codeVerificationStatus`, `platformType`, `connectionType`, and the SINGLE
-        "Refresh status" button (calls repurposed `POST /api/numbers/[id]/verify`). Extend the client
-        `WhatsAppNumber` TS interfaces with the new optional fields; render conditionally so legacy rows don't break.
-      Files: `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/src/app/dashboard/numbers/add/page.tsx`,
-      `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/src/app/dashboard/numbers/[id]/verify/page.tsx`,
-      `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/src/app/dashboard/numbers/page.tsx`,
-      `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/src/app/dashboard/numbers/[id]/page.tsx`
-      Verify: `npm run build` passes (no type errors on the extended interfaces/`NEXT_PUBLIC_*` usage).
-      Live popup is **needs runtime verification** (requires Meta Config ID). (FR-5.3, US-E1/AC #17 —
-      fixes "code_verification_status not visible"; answers "how the number connects without asking IDs")
-
-- [ ] 11. Update `.env.example` and `scratchpad.md`.
-      - `.env.example`: rewrite per design §10.1 — remove Postgres `DATABASE_URL`; add
-        `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `NEXTAUTH_URL`, `NEXTAUTH_SECRET`, `NEXTAUTH_JWT_SECRET`,
-        full Meta set (`META_APP_ID`, `META_APP_SECRET`, `META_ACCESS_TOKEN`, `META_PHONE_NUMBER_ID`,
-        `META_WABA_ID`, `META_WEBHOOK_VERIFY_TOKEN`), `NEXT_PUBLIC_META_APP_ID`, `NEXT_PUBLIC_META_CONFIG_ID`,
-        `ENCRYPTION_KEY` (base64/32-byte, `openssl rand -base64 32`), Razorpay keys. Placeholders only —
-        NO real secrets. Include the Meta-side prerequisites comment block (§10.2).
-      - `scratchpad.md`: refresh `Last updated`, document the two onboarding paths, new endpoints
-        (`/api/numbers/embedded-signup`, `/api/numbers/manual`, repurposed `verify`, neutralized `confirm`,
-        bare `POST /api/numbers` now 400), new `WhatsAppNumber` fields, new env vars, webhook signature
-        verification, the two rewired send paths; prepend a dated change-log entry (newest first).
-      Files: `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/.env.example`,
-      `/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/scratchpad.md`
-      Verify: open both files and confirm `.env.example` has no Postgres `DATABASE_URL` and lists all
-      required keys by name; `scratchpad.md` has the new sections + dated entry. `npm run build` still passes. (FR-9, AC #15, #16)
-
-- [ ] 12. Final integration verification and cleanup.
-      Run the full gate: `npm run build` passes clean; `ENCRYPTION_KEY=$(openssl rand -base64 32)
-      node scripts/test-crypto.mjs` passes. Re-confirm no decrypted token or ciphertext is returned by any
-      number endpoint (all go through `serializeNumber`) and no module logs a token/secret. Remove any
-      temporary files created during verification. Document which user-reported items were verified at
-      runtime vs. left as needs-runtime-verification (Meta Config ID / App Review are user-supplied).
-      Files: none (verification only)
-      Verify: `npm run build` exits 0 and the crypto harness exits 0. (AC #1, #9; closes the regression gate)
+- [ ] 7. Update `scratchpad.md` per the project scratchpad rule.
+      Record: the three template routes now resolve per-tenant WABA credentials via
+      `resolveWabaCredentials` (no `META_WABA_ID`/`META_ACCESS_TOKEN` reads in these
+      routes); the template→WABA mapping rules (explicit `numberId` → template
+      binding → single number → 409/`AMBIGUOUS_NUMBER`); sync iterates all usable
+      WABAs and binds imports to their source number; delete stays best-effort; no
+      schema change. Append a dated "Change log" entry (newest first). Refresh
+      `Last updated:`. Reference config by key name only — no secret values.
+      Files: `scratchpad.md`
+      Verify: `npm run build` still exit 0 (docs-only change does not break the
+      build); the new change-log entry and `Last updated` date are present.

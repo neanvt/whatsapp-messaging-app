@@ -70,9 +70,10 @@ export async function POST(
       },
     });
 
-    // Send via Meta API — resolve per-tenant credentials (decrypted from the
-    // number record, or env fallback). A decrypt/config throw leaves both null
-    // so the missing-creds 500 below fires before any Meta call or extra write.
+    // Send via Meta API — resolve this number's own per-tenant credentials
+    // (decrypted from the number record, no env fallback). A missing token or a
+    // decrypt/config throw leaves both null so the not-connected 400 below fires
+    // before any Meta call or extra write.
     let phoneNumberId: string | null = null;
     let accessToken: string | null = null;
     try {
@@ -84,8 +85,11 @@ export async function POST(
 
     if (!phoneNumberId || !accessToken) {
       return NextResponse.json(
-        { error: "Meta API credentials not configured" },
-        { status: 500 },
+        {
+          error:
+            "This WhatsApp number is not connected. Reconnect it via Embedded Signup or manual connect to send messages.",
+        },
+        { status: 400 },
       );
     }
 

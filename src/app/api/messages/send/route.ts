@@ -102,9 +102,9 @@ export async function POST(request: Request) {
       });
     }
 
-    // Resolve per-tenant credentials (decrypted from the number record, or env
-    // fallback). A decrypt/config throw leaves both null so we funnel into the
-    // existing missing-creds -> failed + refund branch below.
+    // Resolve this number's own per-tenant Meta credentials (decrypted from the
+    // number record — no env fallback). A missing token or a decrypt/config
+    // throw leaves both null so we funnel into the failed + refund branch below.
     let phoneNumberId: string | null = null;
     let accessToken: string | null = null;
     try {
@@ -121,10 +121,11 @@ export async function POST(request: Request) {
 
     if (!phoneNumberId || !accessToken) {
       console.warn(
-        "[Meta] META_PHONE_NUMBER_ID or META_ACCESS_TOKEN not set — message saved but not sent to Meta",
+        "[Meta] WhatsApp number has no stored credentials — reconnect it via Embedded Signup or manual connect",
       );
       finalStatus = "failed";
-      errorMessage = "META_PHONE_NUMBER_ID not configured";
+      errorMessage =
+        "WhatsApp number is not connected. Reconnect it to send messages.";
     } else {
       // Build template components for variables (if any)
       const components: object[] = [];
