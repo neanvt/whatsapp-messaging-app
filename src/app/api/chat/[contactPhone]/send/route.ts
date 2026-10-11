@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/db";
+import { resolveSendCredentials } from "@/lib/whatsapp";
 
 // POST - Send a free-text reply to a contact
 // NOTE: WhatsApp only allows free-text messages within a 24-hour customer
@@ -69,10 +70,17 @@ export async function POST(
       },
     });
 
-    // Send via Meta API
-    const phoneNumberId =
-      waNumber.phoneNumberId ?? process.env.META_PHONE_NUMBER_ID;
-    const accessToken = process.env.META_ACCESS_TOKEN;
+    // Send via Meta API — resolve per-tenant credentials (decrypted from the
+    // number record, or env fallback). A decrypt/config throw leaves both null
+    // so the missing-creds 500 below fires before any Meta call or extra write.
+    let phoneNumberId: string | null = null;
+    let accessToken: string | null = null;
+    try {
+      ({ phoneNumberId, accessToken } = resolveSendCredentials(waNumber));
+    } catch {
+      phoneNumberId = null;
+      accessToken = null;
+    }
 
     if (!phoneNumberId || !accessToken) {
       return NextResponse.json(

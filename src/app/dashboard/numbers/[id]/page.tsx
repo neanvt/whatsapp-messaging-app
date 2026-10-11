@@ -28,6 +28,12 @@ interface WhatsAppNumber {
   verificationStatus: string;
   verifiedAt: string | null;
   createdAt: string;
+  connectionType?: string | null;
+  displayPhoneNumber?: string | null;
+  verifiedName?: string | null;
+  qualityRating?: string | null;
+  codeVerificationStatus?: string | null;
+  platformType?: string | null;
 }
 
 interface NumberDetailPageProps {
@@ -39,6 +45,7 @@ export default function NumberDetailPage({ params }: NumberDetailPageProps) {
   const [number, setNumber] = useState<WhatsAppNumber | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -58,6 +65,26 @@ export default function NumberDetailPage({ params }: NumberDetailPageProps) {
       setError("Failed to load number details");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/numbers/${params.id}/verify`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setNumber(data);
+      } else {
+        setError(data.error || "Failed to refresh status");
+      }
+    } catch {
+      setError("Something went wrong");
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -155,6 +182,13 @@ export default function NumberDetailPage({ params }: NumberDetailPageProps) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          {error && (
+            <div className="p-3 text-sm text-red-500 bg-red-50 rounded-md flex items-center">
+              <AlertCircle className="w-4 h-4 mr-2" />
+              {error}
+            </div>
+          )}
+
           <div className="flex items-center space-x-4">
             <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
               {getStatusIcon(number.verificationStatus)}
@@ -162,7 +196,9 @@ export default function NumberDetailPage({ params }: NumberDetailPageProps) {
             <div>
               <div className="flex items-center space-x-2 mb-1">
                 <Phone className="w-4 h-4 text-muted-foreground" />
-                <p className="font-semibold text-lg">{number.phoneNumber}</p>
+                <p className="font-semibold text-lg">
+                  {number.displayPhoneNumber || number.phoneNumber}
+                </p>
               </div>
               {getStatusBadge(number.verificationStatus)}
             </div>
@@ -183,16 +219,53 @@ export default function NumberDetailPage({ params }: NumberDetailPageProps) {
                 </p>
               </div>
             )}
+            {number.connectionType && (
+              <div>
+                <p className="text-muted-foreground">Connection</p>
+                <p className="font-medium">
+                  {number.connectionType === "embedded_signup"
+                    ? "Embedded Signup"
+                    : "Manual"}
+                </p>
+              </div>
+            )}
+            {number.verifiedName && (
+              <div>
+                <p className="text-muted-foreground">Verified Name</p>
+                <p className="font-medium">{number.verifiedName}</p>
+              </div>
+            )}
+            {number.codeVerificationStatus && (
+              <div>
+                <p className="text-muted-foreground">Code Verification</p>
+                <p className="font-medium">{number.codeVerificationStatus}</p>
+              </div>
+            )}
+            {number.qualityRating && (
+              <div>
+                <p className="text-muted-foreground">Quality Rating</p>
+                <p className="font-medium">{number.qualityRating}</p>
+              </div>
+            )}
+            {number.platformType && (
+              <div>
+                <p className="text-muted-foreground">Platform</p>
+                <p className="font-medium">{number.platformType}</p>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col space-y-2 pt-2">
-            {number.verificationStatus !== "verified" && (
-              <Button asChild>
-                <Link href={`/dashboard/numbers/${number.id}/verify`}>
-                  Continue Verification
-                </Link>
-              </Button>
-            )}
+            <Button
+              variant="outline"
+              onClick={handleRefresh}
+              disabled={refreshing}
+            >
+              <RefreshCw
+                className={`w-4 h-4 mr-2 ${refreshing ? "animate-spin" : ""}`}
+              />
+              {refreshing ? "Refreshing..." : "Refresh status"}
+            </Button>
             {number.verificationStatus === "verified" && (
               <Button asChild variant="outline">
                 <Link href="/dashboard/messages/send">Send a Message</Link>

@@ -19,6 +19,12 @@ interface WhatsAppNumber {
   verificationStatus: string;
   verifiedAt: string | null;
   createdAt: string;
+  connectionType?: string | null;
+  displayPhoneNumber?: string | null;
+  verifiedName?: string | null;
+  qualityRating?: string | null;
+  codeVerificationStatus?: string | null;
+  platformType?: string | null;
 }
 
 export default function NumbersPage() {
@@ -118,14 +124,28 @@ export default function NumbersPage() {
                     <Phone className="w-6 h-6 text-gray-600" />
                   </div>
                   <div>
-                    <p className="font-medium text-lg">{number.phoneNumber}</p>
+                    <p className="font-medium text-lg">
+                      {number.displayPhoneNumber || number.phoneNumber}
+                    </p>
                     <p className="text-sm text-muted-foreground">
                       Added {new Date(number.createdAt).toLocaleDateString()}
+                      {number.connectionType
+                        ? ` · ${
+                            number.connectionType === "embedded_signup"
+                              ? "Embedded Signup"
+                              : "Manual"
+                          }`
+                        : ""}
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center space-x-4">
                   {getStatusBadge(number.verificationStatus)}
+                  {number.codeVerificationStatus && (
+                    <Badge variant="outline">
+                      {number.codeVerificationStatus}
+                    </Badge>
+                  )}
                   {number.verificationStatus !== "verified" && (
                     <Button
                       variant="outline"

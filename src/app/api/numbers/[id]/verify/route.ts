@@ -2,8 +2,11 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/db";
+import { resolveSendCredentials, serializeNumber } from "@/lib/whatsapp";
 
-// POST - Initiate verification for a WhatsApp number
+// POST - Refresh the live Meta health/status for a connected WhatsApp number.
+// No local verification code is generated anymore; this pulls the current
+// status fields straight from the Graph API using the number's stored token.
 export async function POST(
   request: Request,
   { params }: { params: { id: string } }
@@ -25,29 +28,70 @@ export async function POST(
       return NextResponse.json({ error: "Number not found" }, { status: 404 });
     }
 
-    // Generate a random 6-digit code
-    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+    // Legacy numbers with no stored token can't be refreshed — ask the user to
+    // reconnect through the real Connect flow.
+    if (number.accessToken === null) {
+      return NextResponse.json(
+        { error: "Reconnect this number via Connect WhatsApp" },
+        { status: 400 }
+      );
+    }
 
-    // Update the number with verification code and status
-    await prisma.whatsAppNumber.update({
-      where: { id: params.id },
+    let phoneNumberId: string | null = null;
+    let accessToken: string | null = null;
+    try {
+      ({ phoneNumberId, accessToken } = resolveSendCredentials(number));
+    } catch {
+      console.error("[Verify] credential resolution failed (encryption/config)");
+      return NextResponse.json(
+        { error: "Reconnect this number via Connect WhatsApp" },
+        { status: 400 }
+      );
+    }
+
+    if (!phoneNumberId || !accessToken) {
+      return NextResponse.json(
+        { error: "Reconnect this number via Connect WhatsApp" },
+        { status: 400 }
+      );
+    }
+
+    const healthRes = await fetch(
+      `https://graph.facebook.com/v19.0/${phoneNumberId}?fields=display_phone_number,verified_name,quality_rating,code_verification_status,platform_type,status`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }
+    );
+
+    const healthData = await healthRes.json();
+
+    if (!healthRes.ok) {
+      return NextResponse.json(
+        {
+          error:
+            healthData.error?.message ?? "Failed to refresh status from Meta",
+        },
+        { status: 400 }
+      );
+    }
+
+    const updated = await prisma.whatsAppNumber.update({
+      where: { id: number.id },
       data: {
-        verificationCode,
-        verificationStatus: "in_progress",
+        displayPhoneNumber: healthData.display_phone_number ?? null,
+        verifiedName: healthData.verified_name ?? null,
+        qualityRating: healthData.quality_rating ?? null,
+        codeVerificationStatus: healthData.code_verification_status ?? null,
+        platformType: healthData.platform_type ?? null,
       },
     });
 
-    // In production, this would send an SMS or WhatsApp message with the code
-    // For now, we'll log it (in development)
-    console.log(`Verification code for ${number.phoneNumber}: ${verificationCode}`);
-
-    return NextResponse.json({
-      message: "Verification code sent",
-      // Remove this in production - only for testing
-      code: verificationCode,
-    });
+    return NextResponse.json(serializeNumber(updated));
   } catch (error) {
-    console.error("Error initiating verification:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    console.error("Error refreshing number status:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }

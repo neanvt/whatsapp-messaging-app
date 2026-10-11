@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/db";
+import { resolveSendCredentials } from "@/lib/whatsapp";
 
 // POST - Send a message
 export async function POST(request: Request) {
@@ -101,10 +102,18 @@ export async function POST(request: Request) {
       });
     }
 
-    // Resolve phone number ID — stored on number record, or fallback to env
-    const phoneNumberId =
-      number.phoneNumberId ?? process.env.META_PHONE_NUMBER_ID;
-    const accessToken = process.env.META_ACCESS_TOKEN;
+    // Resolve per-tenant credentials (decrypted from the number record, or env
+    // fallback). A decrypt/config throw leaves both null so we funnel into the
+    // existing missing-creds -> failed + refund branch below.
+    let phoneNumberId: string | null = null;
+    let accessToken: string | null = null;
+    try {
+      ({ phoneNumberId, accessToken } = resolveSendCredentials(number));
+    } catch {
+      console.error("[Send] credential resolution failed (encryption/config)");
+      phoneNumberId = null;
+      accessToken = null;
+    }
 
     let metaMessageId: string | null = null;
     let finalStatus = "sent";

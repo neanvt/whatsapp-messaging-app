@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/db";
+import { serializeNumber } from "@/lib/whatsapp";
 
 // GET - Get single number details
 export async function GET(
@@ -25,7 +26,7 @@ export async function GET(
       return NextResponse.json({ error: "Number not found" }, { status: 404 });
     }
 
-    return NextResponse.json(number);
+    return NextResponse.json(serializeNumber(number));
   } catch (error) {
     console.error("Error fetching number:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
