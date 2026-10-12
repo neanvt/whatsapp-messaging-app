@@ -1,0 +1,7 @@
+{
+  "task_id": "task-meta-app-byo",
+  "task_description": "Bring-Your-Own Meta App (Model B) with shared-app fallback (Model A): per-tenant Meta app credentials (App ID, encrypted App Secret, Config ID) stored in a new TenantMetaApp model, a shared resolveMetaAppCredentials resolver (tenant overrides platform env), rewired embedded-signup OAuth exchange and per-app webhook signature verification, a session-scoped /api/meta-app CRUD route, a tenant settings UI, a runtime effective-config fetch on the connect page, and .env.example + scratchpad doc updates. A tenant with no TenantMetaApp row must behave exactly as today (no regression).",
+  "status": "completed",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003"],
+  "blocked_reason": null
+}

@@ -1,0 +1,27 @@
+{
+  "verdict": "APPROVED",
+  "findings": [
+    {
+      "id": 1,
+      "severity": "NIT",
+      "title": "Route-level try/catch asserted by error table but omitted from §5 GET/PUT/DELETE snippets",
+      "location": ".agents/tasks/design-metaapp.md §5 (src/app/api/meta-app/route.ts)",
+      "fix": "State explicitly that each of GET/PUT/DELETE wraps its body in try { ... } catch (e) { console.error(\"[meta-app]\", e); return NextResponse.json({ error: \"Internal server error\" }, { status: 500 }); } so the error-table rows (encrypt throw / DB error -> 500, no secret logged) are realized in code."
+    },
+    {
+      "id": 2,
+      "severity": "NIT",
+      "title": "ENCRYPTION_KEY-missing failure in PUT-create only covered if the handler try/catch exists",
+      "location": ".agents/tasks/design-metaapp.md §5 (PUT create payload encrypt(metaAppSecret!))",
+      "fix": "Fold into finding 1: ensure the PUT body (including the encrypt() call inside upsert.create) is inside the handler try/catch so a missing ENCRYPTION_KEY surfaces as a generic 500, not a raw throw."
+    },
+    {
+      "id": 3,
+      "severity": "NIT",
+      "title": "§4 step 7 'process exactly as today' does not list the now-dead single-secret webhook lines to delete",
+      "location": ".agents/tasks/design-metaapp.md §4 (src/app/api/webhooks/whatsapp/route.ts)",
+      "fix": "Add a note to §4: delete the current `const appSecret = process.env.META_APP_SECRET` guard block and the single-secret ourHex / Buffer.from(ourHex) compare entirely; they are fully replaced by steps 2-6. Only `const raw`, the theirHex/`a` extraction (step 2), and the processing loop (step 7) survive from the original body."
+    }
+  ],
+  "reviewDoc": "/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/.agents/tasks/design-metaapp-review.md"
+}
