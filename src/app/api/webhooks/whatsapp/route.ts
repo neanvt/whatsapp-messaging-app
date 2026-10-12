@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 import prisma from "@/lib/db";
+import { decrypt } from "@/lib/crypto";
 
 // GET - Webhook verification challenge from Meta
 export async function GET(request: Request) {
@@ -19,39 +20,97 @@ export async function GET(request: Request) {
   return new Response("Forbidden", { status: 403 });
 }
 
+// Legit Meta payloads carry exactly one phone_number_id per change; the cap
+// bounds the candidate lookup so an oversized crafted body cannot inflate it.
+const MAX_CANDIDATE_PHONE_IDS = 10;
+
 // POST - Receive status updates and inbound messages from Meta
 export async function POST(request: Request) {
   // --- Verify the payload authenticity (X-Hub-Signature-256) BEFORE parsing ---
-  // Read the raw body first so the HMAC is computed over the exact bytes Meta signed.
+  // (1) Read the raw body exactly once so the HMAC is computed over the exact
+  // bytes Meta signed; the body stream can only be read once.
   const raw = await request.text();
 
-  const appSecret = process.env.META_APP_SECRET;
-  if (!appSecret) {
-    console.error(
-      "[Webhook] Missing required env: META_APP_SECRET — rejecting payload",
-    );
-    return new Response("Unauthorized", { status: 401 });
-  }
-
+  // (2) Signature-header gate FIRST — before any JSON.parse or DB query. A
+  // request without a well-formed signature header never costs a DB round-trip.
   const signatureHeader = request.headers.get("x-hub-signature-256");
   if (!signatureHeader || !signatureHeader.startsWith("sha256=")) {
     console.warn("[Webhook] Missing or malformed X-Hub-Signature-256");
     return new Response("Unauthorized", { status: 401 });
   }
   const theirHex = signatureHeader.slice("sha256=".length);
-
-  const ourHex = crypto
-    .createHmac("sha256", appSecret)
-    .update(raw, "utf8")
-    .digest("hex");
-
   const a = Buffer.from(theirHex, "hex");
-  const b = Buffer.from(ourHex, "hex");
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+
+  // (3) Parse the raw body for routing ONLY — to collect candidate
+  // phone_number_ids (capped). This value is untrusted and grants no trust
+  // until a signature matches below.
+  let parsedPhoneIds: string[] = [];
+  try {
+    const peek = JSON.parse(raw);
+    const ids = new Set<string>();
+    outer: for (const entry of peek?.entry ?? [])
+      for (const change of entry?.changes ?? []) {
+        const id = change?.value?.metadata?.phone_number_id;
+        if (typeof id === "string" && id) {
+          ids.add(id);
+          if (ids.size >= MAX_CANDIDATE_PHONE_IDS) break outer;
+        }
+      }
+    parsedPhoneIds = [...ids];
+  } catch {
+    parsedPhoneIds = []; // unparseable body → platform secret only
+  }
+
+  // (4) Build the bounded candidate-secret set: the platform secret (if set)
+  // plus the decrypted secret of each tenant that owns one of the capped ids.
+  const secrets = new Set<string>();
+  if (process.env.META_APP_SECRET) secrets.add(process.env.META_APP_SECRET);
+  if (parsedPhoneIds.length) {
+    const numbers = await prisma.whatsAppNumber.findMany({
+      where: { phoneNumberId: { in: parsedPhoneIds } },
+      select: { userId: true },
+    });
+    const userIds = [...new Set(numbers.map((n) => n.userId))];
+    if (userIds.length) {
+      const apps = await prisma.tenantMetaApp.findMany({
+        where: { userId: { in: userIds } },
+        select: { metaAppSecret: true },
+      });
+      for (const app of apps) {
+        try {
+          secrets.add(decrypt(app.metaAppSecret));
+        } catch {
+          /* undecryptable candidate: skip, never log, never crash */
+        }
+      }
+    }
+  }
+
+  // (5) Fail closed if no candidate secret is available at all.
+  if (secrets.size === 0) {
+    console.error("[Webhook] No usable app secret — rejecting payload");
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  // (6) Constant-time compare against each candidate; accept iff one validates.
+  let verified = false;
+  for (const secret of secrets) {
+    const ourHex = crypto
+      .createHmac("sha256", secret)
+      .update(raw, "utf8")
+      .digest("hex");
+    const b = Buffer.from(ourHex, "hex");
+    if (a.length === b.length && crypto.timingSafeEqual(a, b)) {
+      verified = true;
+      break;
+    }
+  }
+  if (!verified) {
     console.warn("[Webhook] Signature verification failed");
     return new Response("Unauthorized", { status: 401 });
   }
 
+  // (7) Process exactly as today.
   try {
     const body = JSON.parse(raw);
 

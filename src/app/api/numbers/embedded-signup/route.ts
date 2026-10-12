@@ -4,6 +4,7 @@ import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { authOptions } from "@/lib/auth";
 import { encrypt } from "@/lib/crypto";
+import { resolveMetaAppCredentials, MetaAppConfigError } from "@/lib/meta-app";
 import {
   normalizePhone,
   serializeNumber,
@@ -39,16 +40,17 @@ export async function POST(request: Request) {
     const { code } = parsed.data;
     let { phoneNumberId, wabaId } = parsed.data;
 
-    const appId = process.env.META_APP_ID;
-    const appSecret = process.env.META_APP_SECRET;
-    if (!appId || !appSecret) {
-      console.error(
-        "[EmbeddedSignup] Missing required env: META_APP_ID and/or META_APP_SECRET",
-      );
-      return NextResponse.json(
-        { error: "Server is not configured for Embedded Signup" },
-        { status: 500 },
-      );
+    let appId: string, appSecret: string;
+    try {
+      ({ appId, appSecret } = await resolveMetaAppCredentials(session.user.id));
+    } catch (e) {
+      if (e instanceof MetaAppConfigError) {
+        return NextResponse.json(
+          { error: "Server is not configured for Embedded Signup" },
+          { status: 500 },
+        );
+      }
+      throw e;
     }
 
     // --- Exchange the OAuth code for a business access token (no redirect_uri) ---
