@@ -1,6 +1,6 @@
 # WhatsApp Business Messaging Platform — Technical Reference
 
-Last updated: 2026-10-14
+Last updated: 2026-10-15
 
 ## Overview
 
@@ -83,7 +83,14 @@ Last updated: 2026-10-14
 
 ### UI pages (dashboard)
 
-- `/dashboard/settings` — **Meta App** settings (client page). Loads
+- `/dashboard/settings` — tabbed settings (client page) with three tabs:
+  **Profile**, **Security**, and **Meta App**.
+  - **Profile** tab: read-only Account Info (email + verified badge, join date)
+    plus an Edit Profile form (full name, phone, company) → `GET`/`PUT
+    /api/settings/profile`; on save it also calls `updateSession`.
+  - **Security** tab: Change Password form (current + new + confirm, min 8 chars,
+    client-side match check) → `PUT /api/settings/password`.
+  - **Meta App** tab (described below). Loads
   `GET /api/meta-app`; shows a `Using your own app` / `Using platform app` badge
   from `source`; the App Secret input is `type="password"` and never pre-filled,
   with the helper **"Secret is stored"** when a tenant secret exists (storage
@@ -425,6 +432,19 @@ There is no test runner installed; these two checks are the full gate.
   compile step or new dependency.
 
 ## Change log
+
+### 2026-10-15
+
+- **Fix regression — restore Profile/Security settings alongside Meta App.** The
+  FEAT-003 Settings page had replaced the pre-existing Profile + Security
+  (password) settings UI wholesale, orphaning `/api/settings/profile` and
+  `/api/settings/password` (no UI references). Reworked
+  `src/app/dashboard/settings/page.tsx` into a 3-tab page (**Profile**,
+  **Security**, **Meta App**): restored the original profile-edit and
+  change-password forms (wired to `GET/PUT /api/settings/profile` and `PUT
+  /api/settings/password`) and kept the Meta App Save/Clear/write-only-secret
+  behavior as its own tab. No API shapes or the connect-page message changed.
+  **Verification:** `npm run build` → exit 0; settings page compiles.
 
 ### 2026-10-14
 - **FEAT-003 — Bring-Your-Own Meta App: user surfaces + docs (Model B + Model A
