@@ -29,6 +29,18 @@ model User {
   credits        UserCredits?
   auditLogs      AuditLog[]
   conversations  Conversation[]
+  tenantMetaApp  TenantMetaApp?
+}
+
+model TenantMetaApp {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  metaAppId     String   // plaintext — Meta App ID is not a secret
+  metaAppSecret String   // AES-256-GCM ciphertext at rest — never plaintext, never logged, never returned
+  configId      String?  // optional Embedded Signup Configuration ID — not a secret
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 model UserCredits {

@@ -1,6 +1,6 @@
 # WhatsApp Business Messaging Platform — Technical Reference
 
-Last updated: 2026-10-12
+Last updated: 2026-10-13
 
 ## Overview
 
@@ -246,6 +246,7 @@ The **GET** handshake echoes `hub.challenge` with 200 when `hub.mode ===
 |-------|-----------|---------------|
 | `User` | email (unique), passwordHash, role (`admin`/`superadmin`), isActive | has many numbers, templates, messages, payments, conversations, auditLogs; one credits |
 | `UserCredits` | userId (unique), totalCredits, usedCredits | belongs to User |
+| `TenantMetaApp` | userId (unique — one app per tenant), **metaAppId** (plaintext), **metaAppSecret** (AES-256-GCM ciphertext at rest — never plaintext/logged/returned), configId (optional Embedded Signup Config ID), createdAt, updatedAt | belongs to User (`onDelete: Cascade`, enforced by Prisma; hand-written Turso table omits DB-level FK) |
 | `WhatsAppNumber` | phoneNumber (unique — the ONLY unique key, no compound), wabaId, phoneNumberId, verificationStatus; **accessToken** (AES-256-GCM ciphertext at rest — never plaintext, never logged, stripped from API responses), **tokenExpiresAt**, **displayPhoneNumber**, **verifiedName**, **qualityRating**, **codeVerificationStatus**, **platformType**, **connectionType** (`manual` default / `embedded_signup`) | belongs to User; has templates, messages, conversations |
 | `Template` | name, **category** (marketing/utility/authentication), language, body, header/footer/buttons, status, metaTemplateId | belongs to User + optional WhatsAppNumber; has messages |
 | `Message` | recipientPhone, templateVariables (JSON), status, direction, metaMessageId, errorMessage | belongs to User, WhatsAppNumber, optional Template + Conversation |
@@ -347,6 +348,27 @@ There is no test runner installed; these two checks are the full gate.
   compile step or new dependency.
 
 ## Change log
+
+### 2026-10-13
+- **FEAT-001 — Bring-Your-Own Meta App foundation (Model B + Model A fallback).**
+  First slice of per-tenant Meta app support. No route or UI changes yet
+  (FEAT-002/003).
+  - **Schema:** added `TenantMetaApp` model (`userId @unique`, `metaAppId`
+    plaintext, `metaAppSecret` AES-256-GCM ciphertext, optional `configId`,
+    `createdAt`/`updatedAt`, `onDelete: Cascade`) and `User.tenantMetaApp`
+    back-relation in `prisma/schema.prisma`.
+  - **Migration:** new idempotent `scripts/add-tenant-meta-app-table.mjs`
+    (`CREATE TABLE/INDEX IF NOT EXISTS`; no DB-level FK, no
+    `DEFAULT CURRENT_TIMESTAMP` — Prisma supplies all values). Applied live to
+    Turso: run 1 created the table, run 2 was a clean no-op; `TenantMetaApp_userId_key`
+    unique index confirmed.
+  - **Resolver:** new `src/lib/meta-app.ts` exporting `ResolvedMetaApp`,
+    `MetaAppConfigError`, and `resolveMetaAppCredentials(userId)` — per-tenant row
+    (decrypted secret) takes precedence; falls back to platform
+    `META_APP_ID`/`META_APP_SECRET` env (+ `NEXT_PUBLIC_META_CONFIG_ID`). Bad
+    decrypt or missing platform env → `MetaAppConfigError`; never logs; ciphertext
+    stays local.
+  - Verified with `npm run build` (prisma generate exposes `prisma.tenantMetaApp`).
 
 ### 2026-10-12
 - **Per-tenant migration of the three template-management routes.** Removed all
