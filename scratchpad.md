@@ -1,6 +1,6 @@
 # WhatsApp Business Messaging Platform — Technical Reference
 
-Last updated: 2026-10-13
+Last updated: 2026-10-14
 
 ## Overview
 
@@ -39,6 +39,14 @@ Last updated: 2026-10-13
 - `src/lib/crypto` — AES-256-GCM `encrypt`/`decrypt`; key from `ENCRYPTION_KEY`
   (32 raw bytes base64). Lazy key resolution — missing/short key throws at use
   time, not import time. Ciphertext format: `base64(iv).base64(tag).base64(ct)`.
+- `src/lib/meta-app` — per-tenant Meta **app** resolver. `resolveMetaAppCredentials(userId)`
+  returns `{ appId, appSecret, configId, source }`: a `TenantMetaApp` row (decrypted
+  secret) takes precedence (`source: "tenant"`), else falls back to the platform
+  env `META_APP_ID` / `META_APP_SECRET` (+ `NEXT_PUBLIC_META_CONFIG_ID`, read
+  server-side) (`source: "platform"`). A bad decrypt or missing platform env throws
+  `MetaAppConfigError` (generic message); the ciphertext never leaves the resolver
+  and is never logged. This is the Model B (own app) / Model A (platform fallback)
+  precedence used by embedded-signup and surfaced by `GET /api/meta-app`.
 - `src/lib/whatsapp` — shared onboarding/send helpers: `normalizePhone`
   (strip non-digits), `serializeNumber` (drop `accessToken` ciphertext from API
   responses), `resolveSendCredentials` (decrypt the number's own token for the
@@ -68,7 +76,29 @@ Last updated: 2026-10-13
 - Credits system (balance, deduction per send, refund on failure).
 - Razorpay payments to purchase credit packages.
 - Admin panel: user management, package management, stats.
+- Settings — bring-your-own Meta app (Model B): tenants connect their own Meta
+  app (App ID, Config ID, write-only App Secret) at `/dashboard/settings`, or
+  disconnect to fall back to the platform app (Model A).
 - Audit logging.
+
+### UI pages (dashboard)
+
+- `/dashboard/settings` — **Meta App** settings (client page). Loads
+  `GET /api/meta-app`; shows a `Using your own app` / `Using platform app` badge
+  from `source`; the App Secret input is `type="password"` and never pre-filled,
+  with the helper **"Secret is stored"** when a tenant secret exists (storage
+  fact — `GET` does not decrypt), else "No tenant secret stored (using platform
+  app)". Save → `PUT /api/meta-app` (secret sent only when typed; `configId`
+  null-to-clear / omit-to-keep). Disconnect → `DELETE /api/meta-app` then
+  re-fetch. API errors (incl. 401) surface inline; the page never self-redirects
+  (the `/dashboard` server layout is the auth boundary). The secret is never
+  rendered back.
+- `/dashboard/numbers/add` — connect page. Fetches the effective app/config at
+  runtime from `GET /api/meta-app` and drives `FB.init` / `FB.login` from it (no
+  build-time `NEXT_PUBLIC_*` reads). When either value is absent it shows the
+  verbatim "Embedded Signup is not configured yet…" message. The manual-
+  credentials form (→ `POST /api/numbers/manual`) is gated only on its own
+  `showManual` toggle, so a null/failed config never hides the manual path.
 
 ## Onboarding paths (connecting a WhatsApp number)
 
@@ -78,10 +108,13 @@ against Meta BEFORE any DB write, store the per-tenant token encrypted, and
 reject cross-tenant collisions with 409.
 
 - **Path A — Meta Embedded Signup** (`POST /api/numbers/embedded-signup`):
-  the dashboard opens Meta's OAuth popup via the Facebook JS SDK (using
-  `NEXT_PUBLIC_META_APP_ID` + `NEXT_PUBLIC_META_CONFIG_ID`). The returned OAuth
-  `code` is posted to the server, which exchanges it (with `META_APP_ID` +
-  `META_APP_SECRET`, no redirect_uri) for a business token, resolves the WABA id
+  the dashboard opens Meta's OAuth popup via the Facebook JS SDK using the
+  **effective** app id + config id, fetched at runtime from `GET /api/meta-app`
+  (the tenant's own app if connected, else the platform fallback — see "Model
+  A/B Meta app" below). The returned OAuth `code` is posted to the server, which
+  resolves the app credentials via `resolveMetaAppCredentials(userId)` (tenant
+  app or platform env), exchanges the code (with that `appId` + `appSecret`, no
+  redirect_uri) for a business token, resolves the WABA id
   (body value or `debug_token` granular scopes), discovers the `phoneNumberId`,
   fetches number health, subscribes the app to the WABA + registers the number
   (both non-fatal), then persists the encrypted token with
@@ -94,9 +127,20 @@ reject cross-tenant collisions with 409.
   encrypted token with `connectionType: "manual"` and `verificationStatus:
   "verified"`.
 
-There is NO server-side `META_CONFIG_ID`: the Configuration ID is only read
-client-side via `NEXT_PUBLIC_META_CONFIG_ID` (build-time inlined — changing it
-requires a rebuild).
+### Model A/B Meta app (bring-your-own-app with platform fallback)
+
+Each tenant may connect **their own** Meta app (**Model B**) via the Settings
+page, overriding the platform app for OAuth code exchange and inbound-webhook
+signature verification. A tenant with no `TenantMetaApp` row falls back to the
+platform env app (**Model A**) — byte-for-byte today's behavior. Precedence
+(per-tenant overrides platform) lives in `resolveMetaAppCredentials` (`src/lib/meta-app`).
+No new env var was added — per-tenant app credentials live encrypted in the DB
+(`TenantMetaApp`). The platform `NEXT_PUBLIC_META_CONFIG_ID` is read **both**
+client-side (build-time inlined) **and** server-side (by `resolveMetaAppCredentials`
+and `GET /api/meta-app`); the `NEXT_PUBLIC_` prefix only controls client-bundle
+inlining, it does not block a server-side `process.env` read. The connect page
+fetches the effective config id at runtime, so a tenant's own Config ID overrides
+the platform one without a rebuild.
 
 ## Backend info (API endpoints)
 
@@ -125,6 +169,9 @@ requires a rebuild).
 | GET | `/api/credits/balance` | Credit balance |
 | POST | `/api/payments/create-order` | Create a Razorpay order |
 | POST | `/api/payments/verify` | Verify a Razorpay payment |
+| GET | `/api/meta-app` | Effective Meta app config for the tenant (`{ appId, configId, source, hasSecret }`) — secret VALUE never returned |
+| PUT | `/api/meta-app` | Create/update the tenant's own Meta app (atomic upsert; secret write-only + required-on-create; `configId` null clears / omit keeps) |
+| DELETE | `/api/meta-app` | Disconnect the tenant's own app → revert to platform fallback (idempotent `{ ok: true }`) |
 | GET/PATCH | `/api/settings/profile` | Profile settings |
 | PATCH | `/api/settings/password` | Change password |
 | GET | `/api/admin/stats` | Admin dashboard stats |
@@ -219,23 +266,48 @@ number is always a clean 4xx (400/409), never a 500, never a silent env fallback
 
 ### Webhook — `POST /api/webhooks/whatsapp`
 
-1. **Read the raw body first** so the HMAC is computed over the exact bytes Meta
+Signature verification is **per-app** (Model A/B): Meta signs each payload with
+the app secret of the app subscribed to that WABA, so the route tries a bounded
+candidate-secret set. Load-bearing step order:
+
+1. **Read the raw body once** so the HMAC is computed over the exact bytes Meta
    signed.
-2. **Require `META_APP_SECRET`** — missing → **401** (so delivery-status updates
-   never land without it).
-3. **Verify `X-Hub-Signature-256`:** header must be `sha256=<hex>`; compute
-   `HMAC-SHA256(META_APP_SECRET, raw)` and compare with `crypto.timingSafeEqual`.
-   Missing/malformed/mismatch → **401**, no rows touched.
-4. **Status updates:** `statuses[]` update the matching `Message` by
-   `metaMessageId` (`updateMany`) — set `status`, plus `deliveredAt` / `readAt` /
-   `errorMessage` as applicable.
-5. **Inbound messages:** resolve the owning number STRICTLY by the inbound
-   `metadata.phone_number_id` (no env fallback, no "any verified number"
-   fallback — a payload for a tenant's `phone_number_id` may only write under
-   that tenant). If no number matches, skip. Otherwise upsert the conversation
-   and create an inbound `Message` (`direction: "inbound"`, `status: "received"`).
-6. After processing (or on any parse error) return **200** so Meta does not
-   retry; the 401 guard above is the only non-200 on POST.
+2. **Signature-header gate FIRST (no parse, no DB):** require
+   `x-hub-signature-256` of the form `sha256=<hex>`; missing/malformed → warn +
+   **401** with zero DB work. (This replaces the old unconditional
+   `META_APP_SECRET`-missing 401, which was removed.)
+3. **Peek-parse for routing only (bounded, untrusted):** parse the raw body in a
+   try/catch solely to collect candidate `phone_number_id`s into a Set capped at
+   `MAX_CANDIDATE_PHONE_IDS = 10` (legit payloads carry one); unparseable → `[]`.
+   This value grants no trust — it only selects which secrets to try.
+4. **Build the candidate-secret set:** platform `META_APP_SECRET` (if set) plus,
+   for the capped ids, `whatsAppNumber.findMany({ phoneNumberId: { in } })` →
+   distinct `userId`s → `tenantMetaApp.findMany` → `decrypt(metaAppSecret)`
+   (undecryptable candidate skipped silently — no log, no crash). Reads the
+   ciphertext directly rather than via the resolver to keep skip-bad-candidate
+   semantics.
+5. **Fail closed:** `secrets.size === 0` → **401** (relocated "no usable secret").
+6. **Constant-time compare:** for each candidate compute
+   `HMAC-SHA256(secret, raw)` hex and compare with length-guarded
+   `crypto.timingSafeEqual`; accept iff one matches, else warn + **401**. No
+   secret/ciphertext is ever logged on any branch.
+7. On verified, fall through to the UNCHANGED processing (status updates +
+   inbound routing below). **Intended behavior change:** with `META_APP_SECRET`
+   unset, a Model B tenant's event still verifies against their own secret
+   (today's code blanket-401'd everything); Model A tenants still 401 with no
+   platform secret.
+
+Processing (after verify, unchanged):
+- **Status updates:** `statuses[]` update the matching `Message` by
+  `metaMessageId` (`updateMany`) — set `status`, plus `deliveredAt` / `readAt` /
+  `errorMessage` as applicable.
+- **Inbound messages:** resolve the owning number STRICTLY by the inbound
+  `metadata.phone_number_id` (no env fallback, no "any verified number"
+  fallback — a payload for a tenant's `phone_number_id` may only write under
+  that tenant). If no number matches, skip. Otherwise upsert the conversation
+  and create an inbound `Message` (`direction: "inbound"`, `status: "received"`).
+- After processing (or on any parse error) return **200** so Meta does not
+  retry; the signature-gate 401s are the only non-200 on POST.
 
 The **GET** handshake echoes `hub.challenge` with 200 when `hub.mode ===
 "subscribe"` and `hub.verify_token === META_WEBHOOK_VERIFY_TOKEN`, else 403.
@@ -264,14 +336,14 @@ The **GET** handshake echoes `hub.challenge` with 200 when `hub.mode ===
 |-----|---------|
 | `TURSO_DATABASE_URL` | Turso/libSQL database URL (Prisma datasource) |
 | `TURSO_AUTH_TOKEN` | Turso auth token |
-| `META_APP_ID` | Meta app ID; used for the Embedded Signup OAuth code exchange |
-| `META_APP_SECRET` | Meta app secret; OAuth code exchange + webhook `X-Hub-Signature-256` verification (MANDATORY for delivery status) |
+| `META_APP_ID` | Platform (Model A) Meta app ID; used for the Embedded Signup OAuth code exchange when a tenant has no own app |
+| `META_APP_SECRET` | Platform (Model A) Meta app secret; OAuth code exchange + webhook `X-Hub-Signature-256` verification for platform-app tenants. Model B tenants verify against their own secret; keep it set so platform-app delivery updates aren't 401'd |
 | `META_ACCESS_TOKEN` | Legacy / unused by app code — send AND template routes are strict per-tenant now (kept only for ad-hoc read-only Graph checks) |
 | `META_PHONE_NUMBER_ID` | Legacy / unused by app code (per-tenant now) |
 | `META_WABA_ID` | Legacy / unused by app code — template routes resolve the WABA per-tenant now |
 | `META_WEBHOOK_VERIFY_TOKEN` | Verify token the webhook GET handshake must echo |
-| `NEXT_PUBLIC_META_APP_ID` | Client-exposed Meta app ID for the Facebook JS SDK (build-time inlined) |
-| `NEXT_PUBLIC_META_CONFIG_ID` | Client-exposed Embedded Signup Configuration ID (build-time inlined; no server-side `META_CONFIG_ID` exists) |
+| `NEXT_PUBLIC_META_APP_ID` | Platform (Model A) Meta app ID for the Facebook JS SDK (build-time inlined; connect page uses the effective value from `GET /api/meta-app` at runtime) |
+| `NEXT_PUBLIC_META_CONFIG_ID` | Platform (Model A) Embedded Signup Configuration ID. Inlined into the client bundle at build time AND read server-side by `resolveMetaAppCredentials` / `GET /api/meta-app` (the `NEXT_PUBLIC_` prefix does not block server reads); the connect page fetches the effective (tenant-or-platform) value at runtime |
 | `ENCRYPTION_KEY` | AES-256-GCM key, 32 raw bytes base64 (`openssl rand -base64 32`); encrypts per-tenant access tokens at rest |
 | `NEXTAUTH_URL` | NextAuth base URL |
 | `NEXTAUTH_SECRET` | NextAuth session secret |
@@ -327,8 +399,13 @@ There is no test runner installed; these two checks are the full gate.
   returns before `message.create`/deduction to avoid dangling rows.
 - `WhatsAppNumber.phoneNumber` is the ONLY unique key (no compound unique), so
   onboarding uses find-then-branch (`upsertNumberForUser`), NOT a Prisma upsert.
-- `NEXT_PUBLIC_*` vars are inlined at build time; changing
-  `NEXT_PUBLIC_META_APP_ID` / `NEXT_PUBLIC_META_CONFIG_ID` requires a rebuild.
+- `NEXT_PUBLIC_*` vars are inlined into the client bundle at build time, so any
+  code that reads the inlined constant directly needs a rebuild to pick up a new
+  value. The connect page no longer reads `NEXT_PUBLIC_META_APP_ID` /
+  `NEXT_PUBLIC_META_CONFIG_ID` directly — it fetches the effective app/config at
+  runtime from `GET /api/meta-app` — so a tenant's own app (Model B) takes effect
+  without a rebuild. Both NEXT_PUBLIC_ Meta vars are also read server-side as
+  plain env vars (the prefix only controls client-bundle inlining).
 - Live Meta OAuth / send / delivery paths need a Meta Config ID + App Review +
   a real token (all user-supplied) and cannot be exercised end-to-end from code
   alone; verify handler shape, zod rejects, and the 400/409/500 branches.
@@ -348,6 +425,41 @@ There is no test runner installed; these two checks are the full gate.
   compile step or new dependency.
 
 ## Change log
+
+### 2026-10-14
+- **FEAT-003 — Bring-Your-Own Meta App: user surfaces + docs (Model B + Model A
+  fallback).** Final slice wiring the UI and docs onto the FEAT-001/002 resolver,
+  CRUD route, and per-app webhook.
+  - **New Settings page** `src/app/dashboard/settings/page.tsx` (`"use client"`):
+    loads `GET /api/meta-app`, shows `source` badge + a write-only App Secret
+    input (never pre-filled, helper "Secret is stored" when a tenant secret
+    exists, not "valid"). Save → `PUT` (secret sent only when typed; `configId`
+    null-to-clear / omit-to-keep); Disconnect → `DELETE` then re-fetch. Errors
+    (incl. 401) inline; no self-redirect (the `/dashboard` server layout is the
+    auth boundary). Secret never rendered back.
+  - **Connect page** `src/app/dashboard/numbers/add/page.tsx`: removed the
+    build-time `NEXT_PUBLIC_META_APP_ID` / `NEXT_PUBLIC_META_CONFIG_ID` module
+    reads; now fetches the effective app/config at runtime from `GET /api/meta-app`
+    into `cfg` state and drives `FB.init` / `FB.login` from it (SDK init effect
+    gated on `cfg?.appId`). A failed/500 fetch leaves `cfg` null (treated as not
+    configured) and does not crash. The "Embedded Signup is not configured yet…"
+    message is kept VERBATIM (AC-7). The manual form (`/api/numbers/manual`) stays
+    untouched and gated only on `showManual`, so a null `cfg` never hides it.
+  - **`.env.example`:** reframed `META_APP_ID` / `META_APP_SECRET` as the
+    platform (Model A) fallback used only when a tenant has no `TenantMetaApp`
+    row; `META_WEBHOOK_VERIFY_TOKEN` noted platform-level/shared; replaced the
+    stale "only ever read client-side" `NEXT_PUBLIC_META_CONFIG_ID` claim with
+    the build-time-inlined-AND-server-side wording + runtime effective-fetch
+    note; softened the "requires a REBUILD" caveat to the inlined client constant
+    only; corrected the footer Configuration-ID bullet and `META_APP_SECRET` line
+    (per-app verification). **No new env var introduced**; placeholders only.
+  - **scratchpad.md:** documented the Model A/B app model, `src/lib/meta-app`
+    resolver, `GET/PUT/DELETE /api/meta-app`, per-app bounded-candidate-secret
+    webhook verification, the connect-page runtime effective-config fetch, and
+    the new Settings page; corrected the "NO server-side META_CONFIG_ID" note.
+  - **Verification:** `npm run build` (`prisma generate && next build`) → exit 0;
+    settings + connect pages compile with no server-only imports in the client
+    components.
 
 ### 2026-10-13
 - **FEAT-001 — Bring-Your-Own Meta App foundation (Model B + Model A fallback).**

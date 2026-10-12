@@ -15,9 +15,6 @@ import {
 import { ArrowLeft, AlertCircle } from "lucide-react";
 import Link from "next/link";
 
-const META_APP_ID = process.env.NEXT_PUBLIC_META_APP_ID;
-const META_CONFIG_ID = process.env.NEXT_PUBLIC_META_CONFIG_ID;
-
 // Minimal typing for the FB JS SDK we rely on.
 interface FBStatic {
   init: (opts: {
@@ -55,6 +52,14 @@ export default function ConnectNumberPage() {
   const [showManual, setShowManual] = useState(false);
   const [sdkReady, setSdkReady] = useState(false);
 
+  // Effective Meta app config fetched at runtime from GET /api/meta-app
+  // (tenant's own app if connected, else the platform fallback). Replaces the
+  // old build-time NEXT_PUBLIC_* reads so a tenant's own app needs no rebuild.
+  const [cfg, setCfg] = useState<{
+    appId: string | null;
+    configId: string | null;
+  } | null>(null);
+
   // Captured from the WA_EMBEDDED_SIGNUP postMessage event.
   const sessionInfo = useRef<{ phoneNumberId?: string; wabaId?: string }>({});
 
@@ -64,6 +69,25 @@ export default function ConnectNumberPage() {
   const [accessToken, setAccessToken] = useState("");
   const [label, setLabel] = useState("");
   const [manualLoading, setManualLoading] = useState(false);
+
+  useEffect(() => {
+    // Fetch the effective Meta app config at runtime. A failed/500 fetch is
+    // treated as "not configured" (cfg stays null) and must not crash the page;
+    // the manual-credentials path stays reachable regardless.
+    let active = true;
+    fetch("/api/meta-app")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active || !data) return;
+        setCfg({ appId: data.appId ?? null, configId: data.configId ?? null });
+      })
+      .catch(() => {
+        // Network/other error → leave cfg null (not configured).
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     // Capture the embedded-signup session info from Meta's popup.
@@ -89,8 +113,9 @@ export default function ConnectNumberPage() {
     };
     window.addEventListener("message", onMessage);
 
-    // Inject the FB JS SDK once.
-    if (!META_APP_ID) {
+    // Inject + init the FB JS SDK once the effective app id is known.
+    const appId = cfg?.appId;
+    if (!appId) {
       window.removeEventListener("message", onMessage);
       return;
     }
@@ -98,7 +123,7 @@ export default function ConnectNumberPage() {
     const initFB = () => {
       if (window.FB) {
         window.FB.init({
-          appId: META_APP_ID,
+          appId,
           autoLogAppEvents: true,
           xfbml: false,
           version: "v19.0",
@@ -126,12 +151,12 @@ export default function ConnectNumberPage() {
     return () => {
       window.removeEventListener("message", onMessage);
     };
-  }, []);
+  }, [cfg]);
 
   const handleConnect = () => {
     setError("");
 
-    if (!META_APP_ID || !META_CONFIG_ID) {
+    if (!cfg?.appId || !cfg?.configId) {
       setError(
         "Embedded Signup is not configured yet. Set NEXT_PUBLIC_META_APP_ID and NEXT_PUBLIC_META_CONFIG_ID, or enter credentials manually."
       );
@@ -178,7 +203,7 @@ export default function ConnectNumberPage() {
         }
       },
       {
-        config_id: META_CONFIG_ID,
+        config_id: cfg.configId,
         response_type: "code",
         override_default_response_type: true,
         extras: {
