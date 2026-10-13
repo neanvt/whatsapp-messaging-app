@@ -17,6 +17,7 @@ import {
 
 interface SidebarProps {
   isOpen: boolean;
+  collapsed: boolean;
   onClose: () => void;
 }
 
@@ -30,7 +31,7 @@ const navigation = [
   { name: "Payments", href: "/dashboard/payments", icon: CreditCard },
 ];
 
-export function Sidebar({ isOpen, onClose }: SidebarProps) {
+export function Sidebar({ isOpen, collapsed, onClose }: SidebarProps) {
   const pathname = usePathname();
 
   return (
@@ -45,14 +46,17 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         )}
       />
 
-      {/* Panel: off-canvas drawer below lg, static column at lg+ */}
+      {/* Panel: off-canvas drawer below lg, static (collapsible) column at lg+ */}
       <div
         className={cn(
-          "fixed inset-y-0 left-0 z-40 flex w-64 flex-col bg-gray-900 text-white",
+          "fixed inset-y-0 left-0 z-40 flex w-64 flex-col overflow-hidden bg-gray-900 text-white",
           "h-screen", // full viewport height so the column fills the screen and stays put
           "transition-transform duration-200 ease-in-out",
           isOpen ? "translate-x-0" : "-translate-x-full",
-          "lg:static lg:z-auto lg:h-screen lg:translate-x-0",
+          // At lg+ the drawer transform is irrelevant; it becomes a static column
+          // whose WIDTH collapses to 0 when `collapsed` so the main area expands.
+          "lg:static lg:z-auto lg:h-screen lg:translate-x-0 lg:transition-[width] lg:duration-200",
+          collapsed ? "lg:w-0" : "lg:w-64",
         )}
       >
         <div className="p-6">

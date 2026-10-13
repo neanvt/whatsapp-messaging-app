@@ -18,7 +18,6 @@ export function Header({ isOpen, onMenuClick }: HeaderProps) {
         <Button
           variant="ghost"
           size="icon"
-          className="lg:hidden"
           aria-label="Toggle navigation menu"
           aria-expanded={isOpen}
           onClick={onMenuClick}

@@ -7,13 +7,29 @@ import { Header } from "@/components/dashboard/header";
 import { Footer } from "@/components/dashboard/footer";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
+  // `open` drives the off-canvas drawer below lg; `collapsed` hides the static
+  // sidebar column at lg+. One menu button toggles whichever applies to the
+  // current breakpoint.
   const [open, setOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname();
 
-  // Close on route change (FR2.4)
+  // Close the mobile drawer on route change (FR2.4). Desktop collapse persists.
   useEffect(() => {
     setOpen(false);
   }, [pathname]);
+
+  // One toggle, breakpoint-aware: below lg flip the drawer, at lg+ flip collapse.
+  const handleToggle = () => {
+    if (
+      typeof window !== "undefined" &&
+      window.matchMedia("(min-width: 1024px)").matches
+    ) {
+      setCollapsed((v) => !v);
+    } else {
+      setOpen((v) => !v);
+    }
+  };
 
   // Escape-to-close (FR2.5) + body scroll lock (FR2.6) — only while open AND
   // only below lg. Never lock scroll at lg+, where no overlay is shown and the
@@ -53,9 +69,13 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     // area scrolls. This keeps the sidebar and footer independent of the
     // scrolling content area.
     <div className="flex h-screen overflow-hidden bg-gray-50">
-      <Sidebar isOpen={open} onClose={() => setOpen(false)} />
+      <Sidebar
+        isOpen={open}
+        collapsed={collapsed}
+        onClose={() => setOpen(false)}
+      />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <Header isOpen={open} onMenuClick={() => setOpen((v) => !v)} />
+        <Header isOpen={open} onMenuClick={handleToggle} />
         <main className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6">
           {children}
         </main>

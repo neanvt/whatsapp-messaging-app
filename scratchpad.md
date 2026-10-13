@@ -582,6 +582,14 @@ There is no test runner installed; these two checks are the full gate.
 
 ## Change log
 
+### 2026-10-19 (c) — Sidebar toggle on desktop
+- The header menu button is now visible at ALL breakpoints and is
+  breakpoint-aware: below lg it toggles the off-canvas drawer (as before); at
+  lg+ it toggles a new `collapsed` state that shrinks the static sidebar column
+  to zero width (`lg:w-0`, width transition) so the main area expands, and back.
+  `dashboard-shell.tsx` holds the `collapsed` state; `sidebar.tsx` takes a
+  `collapsed` prop; `header.tsx` dropped the `lg:hidden` on the menu button.
+
 ### 2026-10-19 (b) — Sidebar/footer independent of scrolling content
 - Fixed the dashboard shell so the Sidebar and Footer no longer scroll away with
   page content. `dashboard-shell.tsx` is now `h-screen overflow-hidden`; the
