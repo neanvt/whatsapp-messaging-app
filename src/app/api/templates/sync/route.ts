@@ -51,10 +51,12 @@ export async function POST() {
     }
 
     // Dedupe by wabaId so a WABA shared by several numbers is fetched once.
-    // First number encountered per WABA owns imports from it.
+    // First number encountered per WABA owns imports from it. We also carry the
+    // number's own phoneNumberId so we can verify the WABA genuinely owns this
+    // number before trusting any template it returns (cross-tenant guard).
     const wabaMap = new Map<
       string,
-      { numberId: string; accessToken: string }
+      { numberId: string; phoneNumberId: string | null; accessToken: string }
     >();
     for (const number of numbers) {
       let creds: { wabaId: string | null; accessToken: string | null };
@@ -77,6 +79,7 @@ export async function POST() {
       if (!wabaMap.has(creds.wabaId)) {
         wabaMap.set(creds.wabaId, {
           numberId: number.id,
+          phoneNumberId: number.phoneNumberId,
           accessToken: creds.accessToken,
         });
       }
@@ -100,8 +103,38 @@ export async function POST() {
 
     // Fetch templates from every distinct WABA and tag each with its source
     // number so Meta-only imports can be bound to a concrete number.
+    const skippedWabas: string[] = [];
     const metaTemplates: MetaTemplate[] = [];
-    for (const [wabaId, { numberId, accessToken }] of wabaMap) {
+    for (const [wabaId, { numberId, phoneNumberId, accessToken }] of wabaMap) {
+      // --- Ownership probe (cross-tenant isolation guard) ---
+      // Only import templates from a WABA that provably owns THIS tenant's own
+      // phone number. This blocks the class of bug where a wrong/foreign WABA id
+      // (e.g. a messaging-account id) was stored and sync pulled another
+      // tenant's templates. We import ONLY on a positive owned-phone match; any
+      // probe failure (foreign/not-a-WABA/transient/permission) hard-skips the
+      // WABA rather than trusting it.
+      let owned = false;
+      try {
+        const probeRes = await fetch(
+          `https://graph.facebook.com/v19.0/${encodeURIComponent(wabaId)}/phone_numbers?fields=id&limit=250`,
+          { headers: { Authorization: `Bearer ${accessToken}` } },
+        );
+        if (probeRes.ok) {
+          const probe = await probeRes.json().catch(() => ({}));
+          const list: Array<{ id?: string }> = probe?.data ?? [];
+          owned = !!phoneNumberId && list.some((p) => p.id === phoneNumberId);
+        }
+      } catch {
+        owned = false;
+      }
+      if (!owned) {
+        skippedWabas.push(wabaId);
+        console.warn(
+          `[Template sync] Skipping WABA ${wabaId}: it does not own this tenant's phone number (ownership probe failed) — not importing its templates.`,
+        );
+        continue;
+      }
+
       const metaRes = await fetch(
         `https://graph.facebook.com/v19.0/${wabaId}/message_templates?fields=id,name,status,category,language,components&limit=250&access_token=${accessToken}`,
       );
@@ -259,6 +292,9 @@ export async function POST() {
       )
         continue;
 
+      // Defensive: never import a template without a source number binding.
+      if (!meta.__sourceNumberId) continue;
+
       // Extract body text from components
       const bodyComp = meta.components?.find((c) => c.type === "BODY");
       const headerComp = meta.components?.find((c) => c.type === "HEADER");
@@ -305,6 +341,9 @@ export async function POST() {
       updated,
       imported,
       duplicatesRemoved: duplicateIds.length,
+      // WABAs skipped because they do not own this tenant's phone number
+      // (prevents importing another tenant's templates).
+      skippedWabas,
     });
   } catch (error) {
     console.error("Error syncing templates:", error);
