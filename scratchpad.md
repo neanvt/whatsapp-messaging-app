@@ -1,6 +1,6 @@
 # WhatsApp Business Messaging Platform — Technical Reference
 
-Last updated: 2026-10-18
+Last updated: 2026-10-19
 
 ## Overview
 
@@ -581,6 +581,19 @@ There is no test runner installed; these two checks are the full gate.
   compile step or new dependency.
 
 ## Change log
+
+### 2026-10-19 (public API / M2M — cross-FEAT integration verification)
+
+- Ran full cross-FEAT verification for FEAT-001/002/003: `npm run build`
+  (prisma generate + next build) and `npm run lint` both pass; the live Turso
+  `ApiKey` table plus `ApiKey_keyHash_key` (unique) and `ApiKey_userId_idx`
+  indexes were confirmed, and the create→authenticate(200)→revoke→re-call(401)
+  key lifecycle was proven end to end against live Turso (test row cleaned up).
+- **Added `.eslintrc.json`** (`next/core-web-vitals`, with the presentational
+  `react/no-unescaped-entities` rule disabled) so the declared `npm run lint`
+  gate is actually runnable — the repo previously shipped with no ESLint config,
+  which made `next lint` hang on its interactive setup prompt. Dev-tooling only;
+  no runtime or user-visible change.
 
 ### 2026-10-18 (public API / M2M — FEAT-003: key management + dashboard UI + docs)
 
