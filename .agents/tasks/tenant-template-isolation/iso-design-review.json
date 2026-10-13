@@ -1,0 +1,34 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "reviewDoc": "/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/.agents/tasks/tenant-template-isolation/iso-design-review.md",
+  "findings": [
+    {
+      "id": 1,
+      "severity": "MEDIUM",
+      "area": "run order vs §2 order-independence vs §4 cleanup (Overview, §2, §7, §4)",
+      "summary": "The design states §2 enforces isolation independently of run order. That is true for 'create zero NEW cross-tenant rows' (FR1/AC5), but it is silently untrue for removing the 7 ALREADY-leaked rows: those only disappear from GET /api/templates when §4 cleanup runs. A reader could deploy §2/§3, see sync no longer leak, and conclude the fix is complete while the 7 leaked rows remain visible to Surshyam.",
+      "fix": "Add a sentence to §7's 'Run-order independence of §2' bullet (and Overview) clarifying that §2 prevents new leaks regardless of order but does NOT remove the already-leaked rows — §4 is a hard precondition for the user-visible fix (leaked rows vanishing from the tenant's template list)."
+    },
+    {
+      "id": 2,
+      "severity": "NIT",
+      "area": "not-a-WABA classifier wording (summary table, §3, §6 step 0)",
+      "summary": "The phrase 'the committed isNotAWabaError' reads as if the helper already exists. Grep confirms it does not exist anywhere in the repo; it is a new export this design adds to src/lib/whatsapp.ts.",
+      "fix": "On first mention, change 'the committed isNotAWabaError' to 'the newly added isNotAWabaError (new export in src/lib/whatsapp.ts)'."
+    },
+    {
+      "id": 3,
+      "severity": "NIT",
+      "area": "§3 capture box / §6 step 0 (deferred Graph-error-shape capture)",
+      "summary": "The exact Graph error shape for 989050294147122 is not verifiable from the repo (only phonesRes.status is logged by branch c). The design honestly defers it to a ship-blocking capture step. The isolation guarantee is classifier-independent (§2 positive-match), but AC12 (reject the exact id at connect) remains unproven until the capture runs. Correct handling for a design doc; kept as a NIT, not downgraded from anything.",
+      "fix": "No design change required; keep §6 step 0 as a release gate. Optionally note that AC12 is the only acceptance criterion whose pass/fail is unresolved until the capture completes, so it is a release gate rather than a unit-test assertion."
+    },
+    {
+      "id": 4,
+      "severity": "NIT",
+      "area": "sync response 'synced' field (§2 response shape)",
+      "summary": "Verified: the handler returns synced = localTemplates.length (filtered non-duplicate set, status in submitted/pending/approved), not a count inclusive of imports or all rows. The design's '<local count>' label is slightly imprecise and could invite a wrong 'correction'.",
+      "fix": "Relabel '<local count>' as '<filtered local-template count, unchanged formula>' so the implementer preserves the existing field semantics (AC7)."
+    }
+  ]
+}
