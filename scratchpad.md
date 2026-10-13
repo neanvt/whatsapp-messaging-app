@@ -1,6 +1,6 @@
 # WhatsApp Business Messaging Platform — Technical Reference
 
-Last updated: 2026-10-16
+Last updated: 2026-10-17
 
 ## Overview
 
@@ -227,6 +227,9 @@ the platform one without a rebuild.
 | GET/POST | `/api/admin/users` + `/[id]` | Admin user management |
 | GET/POST | `/api/admin/packages` + `/[id]` | Admin package management |
 | GET/POST | `/api/webhooks/whatsapp` | Meta webhook — GET handshake; POST verifies `X-Hub-Signature-256` then routes inbound/status (see Webhook flow) |
+| POST | `/api/v1/messages` | **Public M2M** — send a template via the key's bound number. Auth: `Authorization: Bearer wa_live_...` only (no session, no client credential). Body `{ recipient, templateName \| templateId, variables? }` (exactly one template key). 200 `{ id, status, metaMessageId }` / 400 / 401 / 402 (credits) / 404 (template) / 500 |
+| GET | `/api/v1/messages/[id]` | **Public M2M** — message status. API-key auth; scoped to owner + bound number. 200 projection (`id,status,recipientPhone,metaMessageId,errorMessage,sentAt,deliveredAt,readAt,createdAt`) / 401 / 404 (identical for unknown vs other-owner/number — no oracle) |
+| GET | `/api/v1/templates` | **Public M2M** — owner's templates (`id,name,category,language,status`). API-key auth; optional `?status` validated against draft/pending/submitted/approved/rejected (400 on unknown). 200 list / 401 / 400 |
 
 ### Message-send flow — `POST /api/messages/send`
 
@@ -257,7 +260,66 @@ the platform one without a rebuild.
 13. **On failure:** refund the credit (non-superadmin) and return 500.
 14. **On success:** return 200 `{ id, status: "sent" }`.
 
-### Chat free-text send — `POST /api/chat/[contactPhone]/send`
+### Shared send core — `sendTemplateMessage` (`src/lib/send-template.ts`)
+
+The entire send core (OTP guard → credit check → message create → deduct →
+`resolveSendCredentials` → Meta fetch → status update → refund-on-failure) was
+**extracted verbatim** out of `POST /api/messages/send` into
+`sendTemplateMessage(input): Promise<SendTemplateResult>` so the session route and
+the public `POST /api/v1/messages` route share one code path and can never drift.
+
+- **Input:** `{ userId, number, template, recipient, variables?, isSuperAdmin }`.
+  The caller resolves+scopes the `number` and `template` and computes
+  `isSuperAdmin` **exactly once**, passing a single boolean through the credit
+  check, deduct, and refund (symmetric credit math). The helper never reads a
+  session, never re-derives superadmin, and never builds a `NextResponse`.
+- **Result:** `{ ok:true, message:{ id, status:"sent", metaMessageId } }` or
+  `{ ok:false, code, error }` where `code` ∈ `{400 (missing OTP), 402
+  (insufficient credits), 500 (not-connected / Meta non-2xx, refund already
+  applied)}`.
+- **402 vs 400:** the helper returns **402** for insufficient credits. The
+  **session wrapper remaps 402→400** to preserve its legacy dashboard code; the
+  **public route surfaces 402 verbatim**. This is the one deliberate asymmetry.
+- The `[Send]` / `[Meta]` console lines moved verbatim; no plaintext token is
+  logged. `src/app/api/messages/send/route.ts` is now a thin session wrapper
+  (session 401 → field 400 → number 400 → template 400 → `sendTemplateMessage` →
+  402→400 remap → success body `{ id, status:"sent", message:"Message sent
+  successfully" }`), observably identical to the pre-refactor route except that remap.
+
+### Public M2M API (`/api/v1/*`) — API-key auth only
+
+A machine-to-machine surface authenticated **only** by a per-tenant API key
+(`Authorization: Bearer wa_live_...`), strictly separate from the session-cookie
+world. A third party supplies **zero** Meta credentials and **zero** number info:
+the key is bound server-side to one `WhatsAppNumber`, and the send always uses
+that bound number (any client-supplied number/credential field is ignored).
+
+- **Auth helper `authenticateApiKey(request)` (`src/lib/api-auth.ts`):** parses
+  `Bearer <token>`, shape-gates via `looksLikeApiKey` (no DB hit on a bad shape),
+  `sha256`-hashes the token, `prisma.apiKey.findUnique({ keyHash })`, rejects
+  null/revoked, does a length-guarded `crypto.timingSafeEqual` on the hash,
+  loads the bound `WhatsAppNumber` (null → reject), fires a best-effort
+  (not awaited, `.catch`) `lastUsedAt` update, and returns
+  `{ userId, apiKey, number }` or `null`. Every failure (missing/malformed
+  header, wrong shape, unknown key, revoked key, vanished number) returns `null`
+  → `unauthorized()` 401 `{ error: "Invalid or missing API key" }` with **no
+  oracle**. The token and hash are never logged.
+- **`POST /api/v1/messages`:** zod body `{ recipient, templateName?, templateId?,
+  variables? }` with an XOR refine (both or neither template key → 400); resolves
+  the template owner-scoped (not-found → 404, exists-but-not-approved → 400);
+  computes `isSuperAdmin` once via `isSuperAdminUser(owner)` (email-driven, so a
+  superadmin whose DB `role` is `"admin"` is not charged); calls the shared
+  `sendTemplateMessage` with `ctx.number`; maps `ok:true` → 200 `{ id, status,
+  metaMessageId }` and `ok:false` → the helper code verbatim (402/400/500).
+- **`GET /api/v1/messages/[id]`:** `findFirst` scoped to `{ id, userId,
+  whatsappNumberId }` — a non-matching id (unknown OR other-owner/other-number)
+  returns the identical 404; the path id is never logged. Returns a
+  non-credential `select` allow-list.
+- **`GET /api/v1/templates`:** scoped to `ctx.userId`; optional `?status`
+  validated against the known set (400 on unknown); returns an
+  `id/name/category/language/status` allow-list, newest first.
+
+
 
 Session-gated. No credit logic. Resolves credentials via
 `resolveSendCredentials` for the selected (or first verified) number; a
@@ -474,6 +536,48 @@ There is no test runner installed; these two checks are the full gate.
   compile step or new dependency.
 
 ## Change log
+
+### 2026-10-17 (public API / M2M — FEAT-002: public /api/v1 surface + send refactor)
+
+- **New `src/lib/api-auth.ts`** — `authenticateApiKey(request)` (Bearer parse →
+  `looksLikeApiKey` shape gate, no DB on bad shape → `sha256` → `apiKey.findUnique`
+  by `keyHash` → reject null/revoked → length-guarded `timingSafeEqual` →
+  load bound `WhatsAppNumber` → best-effort fire-and-forget `lastUsedAt` →
+  `{ userId, apiKey, number }` | `null`) and `unauthorized()` (401 `{ error:
+  "Invalid or missing API key" }`). Token/hash never logged; all failures 401
+  with no oracle.
+- **New `src/lib/send-template.ts`** — `sendTemplateMessage(input)`, the send core
+  extracted **verbatim** from the old `POST /api/messages/send` body (OTP guard →
+  credit check → message create → deduct → `resolveSendCredentials` → Meta fetch →
+  status update → refund-on-failure). Returns a plain `{ ok:true, message } |
+  { ok:false, code, error }`, never a `NextResponse`, never reads a session.
+  `isSuperAdmin` is supplied once by the caller and threaded through check/deduct/
+  refund (symmetric credit math). Insufficient credits → **402**.
+- **Rewrote `src/app/api/messages/send/route.ts`** as a thin session wrapper over
+  `sendTemplateMessage`. Observable behavior is byte-for-byte identical to the
+  pre-refactor route (confirmed by git diff + a code/string/body trace) **except**
+  the internal **402→400 remap** so the dashboard keeps its legacy
+  insufficient-credits code. OTP-before-credits-before-side-effect ordering
+  preserved (OTP guard runs first inside the helper, still before any mutation).
+- **New public `/api/v1` routes (API-key auth only, no session):**
+  - `POST /api/v1/messages` — zod `{ recipient, templateName|templateId (XOR),
+    variables? }`; ignores any client number/credential and always uses
+    `ctx.number`; template resolved owner-scoped (404 not-found / 400 not-approved);
+    `isSuperAdmin` via `isSuperAdminUser(owner)` computed once; maps the helper
+    result (200 `{ id, status, metaMessageId }` / 402 / 400 / 500 verbatim).
+  - `GET /api/v1/messages/[id]` — `findFirst` scoped to owner + bound number;
+    identical 404 for unknown vs other-owner/number; path id never logged;
+    non-credential `select` allow-list.
+  - `GET /api/v1/templates` — scoped to `ctx.userId`; optional `?status` validated
+    (400 on unknown); `id/name/category/language/status` allow-list.
+- **Verification:** `npm run build` (`prisma generate && next build`) → exit 0;
+  all three `/api/v1` routes compile. `grep -rn "wa_live_|keyHash" src` shows only
+  the `PREFIX` constant and `keyHash` used as a Prisma `where`/compare field — no
+  secret is logged. Static trace confirmed: no client number/credential accepted,
+  `isSuperAdminUser` computed once, symmetric credit math. `npm run lint` could
+  not complete in this environment (pre-existing: `next lint` drops into an
+  interactive config prompt because the project ships no ESLint config); the lint
+  pass inside `next build` succeeded.
 
 ### 2026-10-16 (public API / M2M — FEAT-001: data layer + key helpers)
 

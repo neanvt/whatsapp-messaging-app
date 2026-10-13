@@ -2,9 +2,12 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/db";
-import { resolveSendCredentials } from "@/lib/whatsapp";
+import { sendTemplateMessage } from "@/lib/send-template";
 
-// POST - Send a message
+// POST - Send a message (session/dashboard path). Thin wrapper over the shared
+// sendTemplateMessage core; observable behavior is identical to the pre-refactor
+// route except the internal 402 (insufficient credits) is remapped back to 400 so
+// the dashboard keeps its legacy status code.
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -54,171 +57,23 @@ export async function POST(request: Request) {
       );
     }
 
-    // Authentication templates require the OTP code as the first variable.
-    // Guard here — before any message record or credit deduction — so a
-    // missing OTP never leaves a dangling message row or a mis-deducted credit.
-    if (template.category === "authentication" && !variables?.[0]) {
-      return NextResponse.json(
-        { error: "OTP code variable required for authentication template" },
-        { status: 400 },
-      );
-    }
-
-    // Superadmin has unlimited credits — skip balance check
-    const isSuperAdmin = session.user.role === "superadmin";
-
-    if (!isSuperAdmin) {
-      const userCredits = await prisma.userCredits.findUnique({
-        where: { userId: session.user.id },
-      });
-      if (!userCredits || userCredits.totalCredits <= 0) {
-        return NextResponse.json(
-          { error: "Insufficient credits" },
-          { status: 400 },
-        );
-      }
-    }
-
-    // Create message record
-    const message = await prisma.message.create({
-      data: {
-        userId: session.user.id,
-        whatsappNumberId: numberId,
-        templateId: templateId,
-        recipientPhone: recipient,
-        templateVariables: variables?.length ? JSON.stringify(variables) : null,
-        status: "queued",
-      },
+    const result = await sendTemplateMessage({
+      userId: session.user.id,
+      number,
+      template,
+      recipient,
+      variables,
+      isSuperAdmin: session.user.role === "superadmin",
     });
 
-    // Deduct credit (superadmin is exempt)
-    if (!isSuperAdmin) {
-      await prisma.userCredits.update({
-        where: { userId: session.user.id },
-        data: {
-          totalCredits: { decrement: 1 },
-          usedCredits: { increment: 1 },
-        },
-      });
-    }
-
-    // Resolve this number's own per-tenant Meta credentials (decrypted from the
-    // number record — no env fallback). A missing token or a decrypt/config
-    // throw leaves both null so we funnel into the failed + refund branch below.
-    let phoneNumberId: string | null = null;
-    let accessToken: string | null = null;
-    try {
-      ({ phoneNumberId, accessToken } = resolveSendCredentials(number));
-    } catch {
-      console.error("[Send] credential resolution failed (encryption/config)");
-      phoneNumberId = null;
-      accessToken = null;
-    }
-
-    let metaMessageId: string | null = null;
-    let finalStatus = "sent";
-    let errorMessage: string | null = null;
-
-    if (!phoneNumberId || !accessToken) {
-      console.warn(
-        "[Meta] WhatsApp number has no stored credentials — reconnect it via Embedded Signup or manual connect",
-      );
-      finalStatus = "failed";
-      errorMessage =
-        "WhatsApp number is not connected. Reconnect it to send messages.";
-    } else {
-      // Build template components for variables (if any)
-      const components: object[] = [];
-      const vars: string[] = variables?.length ? variables : [];
-      if (vars.length > 0) {
-        components.push({
-          type: "body",
-          parameters: vars.map((v: string) => ({ type: "text", text: v })),
-        });
-      }
-
-      // Authentication templates carry a copy-code URL button that requires
-      // the OTP code as its parameter; without it Meta returns (#131008).
-      // Keyed on variables?.[0] to mirror the early missing-OTP guard above.
-      if (template.category === "authentication" && variables?.[0]) {
-        components.push({
-          type: "button",
-          sub_type: "url",
-          index: "0",
-          parameters: [{ type: "text", text: variables[0] }],
-        });
-      }
-
-      const metaPayload = {
-        messaging_product: "whatsapp",
-        to: recipient.replace(/\D/g, ""), // strip non-digits
-        type: "template",
-        template: {
-          name: template.name,
-          language: { code: template.language ?? "en" },
-          ...(components.length > 0 ? { components } : {}),
-        },
-      };
-
-      console.log(
-        "[Meta] Sending message:",
-        JSON.stringify(metaPayload, null, 2),
-      );
-
-      const metaRes = await fetch(
-        `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(metaPayload),
-        },
-      );
-
-      const metaData = await metaRes.json();
-
-      if (!metaRes.ok) {
-        console.error("[Meta] Send error:", metaData);
-        finalStatus = "failed";
-        errorMessage = metaData.error?.message ?? "Failed to send via Meta API";
-      } else {
-        metaMessageId = metaData.messages?.[0]?.id ?? null;
-        console.log("[Meta] Message sent, id:", metaMessageId);
-      }
-    }
-
-    // Update message record with result
-    await prisma.message.update({
-      where: { id: message.id },
-      data: {
-        status: finalStatus,
-        sentAt: finalStatus === "sent" ? new Date() : undefined,
-        metaMessageId,
-        errorMessage,
-      },
-    });
-
-    if (finalStatus === "failed") {
-      // Refund the credit since send failed (superadmin not charged in the first place)
-      if (!isSuperAdmin) {
-        await prisma.userCredits.update({
-          where: { userId: session.user.id },
-          data: {
-            totalCredits: { increment: 1 },
-            usedCredits: { decrement: 1 },
-          },
-        });
-      }
-      return NextResponse.json(
-        { error: errorMessage ?? "Failed to send message" },
-        { status: 500 },
-      );
+    if (!result.ok) {
+      // Preserve legacy observable codes for the dashboard: insufficient-credits was 400 here.
+      const code = result.code === 402 ? 400 : result.code;
+      return NextResponse.json({ error: result.error }, { status: code });
     }
 
     return NextResponse.json({
-      id: message.id,
+      id: result.message.id,
       status: "sent",
       message: "Message sent successfully",
     });

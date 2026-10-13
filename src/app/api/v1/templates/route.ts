@@ -1,0 +1,39 @@
+import { NextResponse } from "next/server";
+import prisma from "@/lib/db";
+import { authenticateApiKey, unauthorized } from "@/lib/api-auth";
+
+const KNOWN = ["draft", "pending", "submitted", "approved", "rejected"] as const;
+
+// GET - Public template list. API-key auth only; scoped to the key owner. Optional
+// ?status narrows the list and is validated against the known set (400 on unknown).
+// The select is a non-credential allow-list.
+export async function GET(request: Request) {
+  const ctx = await authenticateApiKey(request);
+  if (!ctx) return unauthorized();
+
+  const url = new URL(request.url);
+  const rawStatus = url.searchParams.get("status");
+  if (
+    rawStatus !== null &&
+    !KNOWN.includes(rawStatus as (typeof KNOWN)[number])
+  ) {
+    return NextResponse.json(
+      { error: `Invalid status. Allowed: ${KNOWN.join(", ")}` },
+      { status: 400 },
+    );
+  }
+
+  const templates = await prisma.template.findMany({
+    where: { userId: ctx.userId, ...(rawStatus ? { status: rawStatus } : {}) },
+    select: {
+      id: true,
+      name: true,
+      category: true,
+      language: true,
+      status: true,
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return NextResponse.json(templates);
+}
