@@ -13,6 +13,10 @@ const Body = z
     variables: z.array(z.string()).optional(),
     mediaUrl: z.string().optional(),
     documentUrl: z.string().optional(),
+    documentBase64: z.string().optional(),
+    pdfBase64: z.string().optional(),
+    mediaBase64: z.string().optional(),
+    mediaId: z.string().optional(),
     fileName: z.string().optional(),
     filename: z.string().optional(),
     buttonParam: z.string().optional(),
@@ -47,6 +51,10 @@ export async function POST(request: Request) {
       filename,
       buttonParam,
       buttonUrlParam,
+      documentBase64,
+      pdfBase64,
+      mediaBase64,
+      mediaId,
     } = parsed.data;
 
     // Resolve the template by owner + name/id. Split not-found (404) from
@@ -88,6 +96,10 @@ export async function POST(request: Request) {
       filename,
       buttonParam,
       buttonUrlParam,
+      documentBase64,
+      pdfBase64,
+      mediaBase64,
+      mediaId,
       isSuperAdmin,
     });
 

@@ -19,6 +19,10 @@ export interface SendTemplateInput {
   filename?: string;
   buttonParam?: string;
   buttonUrlParam?: string;
+  documentBase64?: string;
+  pdfBase64?: string;
+  mediaBase64?: string;
+  mediaId?: string;
   isSuperAdmin: boolean; // caller supplies; computed ONCE by the caller
 }
 
@@ -44,6 +48,10 @@ export async function sendTemplateMessage(
     filename,
     buttonParam,
     buttonUrlParam,
+    documentBase64,
+    pdfBase64,
+    mediaBase64,
+    mediaId,
     isSuperAdmin,
   } = input;
 
@@ -120,8 +128,52 @@ export async function sendTemplateMessage(
     const components: object[] = [];
     const docUrl = documentUrl || mediaUrl;
     const headerType = (template.headerType || "").toLowerCase();
+    const resolvedFilename = fileName || filename || "receipt.pdf";
+    const rawBase64 = documentBase64 || pdfBase64 || mediaBase64;
 
-    if (docUrl) {
+    let headerMediaId = mediaId || null;
+
+    if (!headerMediaId && rawBase64 && phoneNumberId && accessToken) {
+      try {
+        const cleanB64 = rawBase64.replace(/^data:[^;]+;base64,/, "");
+        const buf = Buffer.from(cleanB64, "base64");
+        const mimeType = headerType === "image" ? "image/jpeg" : headerType === "video" ? "video/mp4" : "application/pdf";
+        const formData = new FormData();
+        formData.append("messaging_product", "whatsapp");
+        formData.append("type", mimeType);
+        formData.append("file", new Blob([buf], { type: mimeType }), resolvedFilename);
+
+        const upRes = await fetch(
+          `https://graph.facebook.com/v19.0/${phoneNumberId}/media`,
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${accessToken}` },
+            body: formData,
+          },
+        );
+        const upData = await upRes.json();
+        if (upData.id) {
+          headerMediaId = upData.id;
+          console.log("[Meta] Uploaded media to Meta, id:", headerMediaId);
+        } else {
+          console.warn("[Meta] Media upload returned without id:", upData);
+        }
+      } catch (upErr) {
+        console.error("[Meta] Media upload exception:", upErr);
+      }
+    }
+
+    if (headerMediaId) {
+      const paramType = headerType === "image" ? "image" : headerType === "video" ? "video" : "document";
+      const mediaObj = { id: headerMediaId };
+      if (paramType === "document") {
+        mediaObj.filename = resolvedFilename;
+      }
+      components.push({
+        type: "header",
+        parameters: [{ type: paramType, [paramType]: mediaObj }],
+      });
+    } else if (docUrl) {
       if (headerType === "image") {
         components.push({
           type: "header",
@@ -140,14 +192,44 @@ export async function sendTemplateMessage(
               type: "document",
               document: {
                 link: docUrl,
-                filename: fileName || filename || "receipt.pdf",
+                filename: resolvedFilename,
               },
             },
           ],
         });
       }
+    } else if (headerType === "document") {
+      try {
+        const dummyPdf = Buffer.from("%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R/Resources<<>>>>endobj\nxref\n0 4\n0000000000 65535 f\n0000000009 00000 n\n0000000052 00000 n\n00000000101 00000 n\ntrailer<</Size 4/Root 1 0 R>>\nstartxref\n178\n%%EOF\n");
+        const formData = new FormData();
+        formData.append("messaging_product", "whatsapp");
+        formData.append("type", "application/pdf");
+        formData.append("file", new Blob([dummyPdf], { type: "application/pdf" }), resolvedFilename);
+
+        const upRes = await fetch(
+          `https://graph.facebook.com/v19.0/${phoneNumberId}/media`,
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${accessToken}` },
+            body: formData,
+          },
+        );
+        const upData = await upRes.json();
+        if (upData.id) {
+          components.push({
+            type: "header",
+            parameters: [
+              {
+                type: "document",
+                document: { id: upData.id, filename: resolvedFilename },
+              },
+            ],
+          });
+        }
+      } catch (fallbackErr) {
+        console.warn("[Meta] Fallback document upload failed:", fallbackErr);
+      }
     } else if (headerType === "image") {
-      // Default placeholder if template strictly requires an image header
       components.push({
         type: "header",
         parameters: [
