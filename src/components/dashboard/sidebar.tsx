@@ -12,6 +12,7 @@ import {
   Settings,
   MessagesSquare,
   BookOpen,
+  KeyRound,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -23,6 +24,7 @@ const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "WhatsApp Numbers", href: "/dashboard/numbers", icon: Phone },
   { name: "Templates", href: "/dashboard/templates", icon: FileText },
+  { name: "API Keys", href: "/dashboard/api-keys", icon: KeyRound },
   { name: "Bulk Messages", href: "/dashboard/messages", icon: MessageSquare },
   { name: "Chat", href: "/dashboard/chat", icon: MessagesSquare },
   { name: "Payments", href: "/dashboard/payments", icon: CreditCard },

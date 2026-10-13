@@ -1,6 +1,6 @@
 # WhatsApp Business Messaging Platform — Technical Reference
 
-Last updated: 2026-10-17
+Last updated: 2026-10-18
 
 ## Overview
 
@@ -146,8 +146,14 @@ when one is selected) while keeping both side by side at `lg+`.
   1-credit cost), receiving data via the Meta webhook, a full API reference built
   from the real route handlers (methods, paths, zod/destructured bodies, sample
   curl + JSON, status codes), an end-to-end walkthrough, an env-name-only table,
-  and a troubleshooting table. Honest about auth: session-cookie guarded, no
-  API-key scheme. Linked from the dashboard sidebar as "Developer Docs".
+  and a troubleshooting table. Section 6 **"Connect a third-party application
+  (Server-to-server API)"** documents the public `/api/v1` M2M surface: key
+  creation in the dashboard, the `Authorization: Bearer wa_live_xxx` scheme, the
+  zero-Meta-credential / zero-number guarantee, the three endpoints with curl +
+  JSON + real status codes (401/400/402/404/500), and the key lifecycle. The
+  session-cookie auth note in the API reference now says those routes power the
+  dashboard UI while `/api/v1` is the integration path for third-party servers.
+  Linked from the dashboard sidebar as "Developer Docs".
 
 ## Onboarding paths (connecting a WhatsApp number)
 
@@ -230,6 +236,9 @@ the platform one without a rebuild.
 | POST | `/api/v1/messages` | **Public M2M** — send a template via the key's bound number. Auth: `Authorization: Bearer wa_live_...` only (no session, no client credential). Body `{ recipient, templateName \| templateId, variables? }` (exactly one template key). 200 `{ id, status, metaMessageId }` / 400 / 401 / 402 (credits) / 404 (template) / 500 |
 | GET | `/api/v1/messages/[id]` | **Public M2M** — message status. API-key auth; scoped to owner + bound number. 200 projection (`id,status,recipientPhone,metaMessageId,errorMessage,sentAt,deliveredAt,readAt,createdAt`) / 401 / 404 (identical for unknown vs other-owner/number — no oracle) |
 | GET | `/api/v1/templates` | **Public M2M** — owner's templates (`id,name,category,language,status`). API-key auth; optional `?status` validated against draft/pending/submitted/approved/rejected (400 on unknown). 200 list / 401 / 400 |
+| GET | `/api/api-keys` | **Key management (session)** — list the caller's API keys. `select` allow-list (`id,name,keyPrefix,lastUsedAt,revokedAt,createdAt` + bound number `id/phoneNumber/displayPhoneNumber`), **never** `keyHash`. 200 / 401 / 500 |
+| POST | `/api/api-keys` | **Key management (session)** — create a key bound to a verified owned number. zod `{ name, numberId }`; unverified/unowned number → 400. **One-time reveal:** 201 `{ id, name, keyPrefix, whatsappNumberId, lastUsedAt, revokedAt, createdAt, key }` — plaintext `key` returned ONLY here, never stored, never re-returned; `keyHash` never in any response. 400 / 401 / 500 |
+| DELETE | `/api/api-keys/[id]` | **Key management (session)** — revoke (`revokedAt`). Scoped to `session.user.id`; another user's key → 404 (never revocable). Idempotent (re-revoke → 200 `{ id, revoked: true }`). 200 / 401 / 404 / 500 |
 
 ### Message-send flow — `POST /api/messages/send`
 
@@ -318,6 +327,41 @@ that bound number (any client-supplied number/credential field is ignored).
 - **`GET /api/v1/templates`:** scoped to `ctx.userId`; optional `?status`
   validated against the known set (400 on unknown); returns an
   `id/name/category/language/status` allow-list, newest first.
+
+### API-key management (`/api/api-keys/*`) — session auth only
+
+The dashboard mints and revokes keys here; this is the only place a plaintext key
+is ever produced, and it is strictly session-cookie world (no API key accepted).
+
+- **`GET /api/api-keys` (`src/app/api/api-keys/route.ts`):** session-guarded,
+  scoped to `session.user.id`; `select` allow-list returning `id/name/keyPrefix/
+  lastUsedAt/revokedAt/createdAt` plus the bound number (`id/phoneNumber/
+  displayPhoneNumber`). **Never** selects `keyHash`.
+- **`POST /api/api-keys` (same file):** zod `{ name, numberId }`; verifies the
+  number is owned + `verified` (else 400 "Invalid or unverified WhatsApp number");
+  `generateApiKey()` → stores `keyHash` + `keyPrefix` only; returns **201** with
+  the create-projection **plus `key: plaintext`** — the one-time reveal. `keyHash`
+  is never in the body; the plaintext is never stored or logged.
+- **`DELETE /api/api-keys/[id]` (`src/app/api/api-keys/[id]/route.ts`):**
+  session-guarded `findFirst` scoped to the caller → absent/other-user → 404 (no
+  cross-user revoke); already-revoked → idempotent 200 `{ id, revoked: true }`;
+  else sets `revokedAt` and returns `{ id, revoked: true }`. Once revoked,
+  `authenticateApiKey` rejects immediately.
+
+### API Keys dashboard page (`/dashboard/api-keys`)
+
+Client page (`src/app/dashboard/api-keys/page.tsx`, `"use client"`) modelled on
+the Settings page (`max-w-3xl mx-auto`, `@/components/ui/{card,button,input,label,
+badge}`, lucide `KeyRound`). On mount it `GET /api/api-keys` for the list and
+`GET /api/numbers` filtered to `verificationStatus === "verified"` for the create
+`<select>`. Create → `POST /api/api-keys`; on success the plaintext `key` is shown
+once in an amber callout with a Copy button and the warning "Copy this key now.
+For your security it will not be shown again," cleared from state on dismiss. Each
+active key shows name, `keyPrefix…`, bound number (`displayPhoneNumber ??
+phoneNumber`), last-used, created, and an Active/Revoked `Badge`; a Revoke button
+(with a `confirm`) → `DELETE /api/api-keys/{id}` then refresh. Fully responsive
+(single-column stacking, `grid-cols-1 sm:grid-cols-2` form). Linked from the
+sidebar as **"API Keys"** (`KeyRound` icon, after Templates).
 
 
 
@@ -430,6 +474,7 @@ The **GET** handshake echoes `hub.challenge` with 200 when `hub.mode ===
 | `User` | email (unique), passwordHash, role (`admin`/`superadmin`), isActive | has many numbers, templates, messages, payments, conversations, auditLogs; one credits |
 | `UserCredits` | userId (unique), totalCredits, usedCredits | belongs to User |
 | `TenantMetaApp` | userId (unique — one app per tenant), **metaAppId** (plaintext), **metaAppSecret** (AES-256-GCM ciphertext at rest — never plaintext/logged/returned), configId (optional Embedded Signup Config ID), createdAt, updatedAt | belongs to User (`onDelete: Cascade`, enforced by Prisma; hand-written Turso table omits DB-level FK) |
+| `ApiKey` | userId, whatsappNumberId (immutable binding), name?, keyPrefix (non-secret display fragment e.g. `wa_live_ab12`), **keyHash** (SHA-256 hex, `@unique` — never plaintext/logged/returned), lastUsedAt?, revokedAt?, createdAt, updatedAt; `@@index([userId])` | belongs to User + WhatsAppNumber (both `onDelete: Cascade`); powers the public `/api/v1` M2M auth |
 | `WhatsAppNumber` | phoneNumber (unique — the ONLY unique key, no compound), wabaId, phoneNumberId, verificationStatus; **accessToken** (AES-256-GCM ciphertext at rest — never plaintext, never logged, stripped from API responses), **tokenExpiresAt**, **displayPhoneNumber**, **verifiedName**, **qualityRating**, **codeVerificationStatus**, **platformType**, **connectionType** (`manual` default / `embedded_signup`) | belongs to User; has templates, messages, conversations |
 | `Template` | name, **category** (marketing/utility/authentication), language, body, header/footer/buttons, status, metaTemplateId | belongs to User + optional WhatsAppNumber; has messages |
 | `Message` | recipientPhone, templateVariables (JSON), status, direction, metaMessageId, errorMessage | belongs to User, WhatsAppNumber, optional Template + Conversation |
@@ -536,6 +581,48 @@ There is no test runner installed; these two checks are the full gate.
   compile step or new dependency.
 
 ## Change log
+
+### 2026-10-18 (public API / M2M — FEAT-003: key management + dashboard UI + docs)
+
+- **New `src/app/api/api-keys/route.ts`** — session-guarded key management.
+  - `GET` lists the caller's keys scoped to `session.user.id` via a `select`
+    allow-list (`id,name,keyPrefix,lastUsedAt,revokedAt,createdAt` + bound number
+    `id/phoneNumber/displayPhoneNumber`); **never** selects `keyHash`.
+  - `POST` zod `{ name, numberId }`; verifies the number is owned + `verified`
+    (else 400 "Invalid or unverified WhatsApp number"); `generateApiKey()` →
+    stores only `keyHash` + `keyPrefix`; returns **201** with the create projection
+    `{ id, name, keyPrefix, whatsappNumberId, lastUsedAt, revokedAt, createdAt }`
+    **plus `key: plaintext`** — the one-time reveal. `keyHash` never appears in any
+    response; the plaintext is never stored or logged.
+- **New `src/app/api/api-keys/[id]/route.ts`** — `DELETE` revoke. Session-guarded
+  `findFirst` scoped to the caller → absent/other-user → **404** (never revocable
+  cross-user); already-revoked → idempotent **200** `{ id, revoked: true }`; else
+  sets `revokedAt`. Once revoked, `authenticateApiKey` rejects the key.
+- **New `src/app/dashboard/api-keys/page.tsx`** (`"use client"`) — mobile-
+  responsive management UI modelled on the Settings page. Lists keys (name,
+  `keyPrefix`, bound number, last-used, Active/Revoked badge), a create form (name
+  + verified-number `<select>` from `GET /api/numbers`), the one-time plaintext
+  reveal in an amber callout with a Copy button and the "Copy this key now. For
+  your security it will not be shown again." warning (cleared on dismiss), and a
+  per-key Revoke button with a `confirm`.
+- **`src/components/dashboard/sidebar.tsx`** — added the `{ name: "API Keys",
+  href: "/dashboard/api-keys", icon: KeyRound }` nav item (after Templates),
+  inheriting the existing active-state + mobile-drawer behavior.
+- **`src/app/docs/page.tsx`** — added section **6 "Connect a third-party
+  application (Server-to-server API)"** (+ TOC entry; renumbered later sections
+  7–11): key creation in the dashboard, the `Authorization: Bearer wa_live_xxx`
+  scheme, the zero-Meta-credential / zero-number guarantee + per-owner scoping,
+  the three endpoints with curl + JSON + real codes (401/400/402/404/500), and the
+  key lifecycle. Corrected the stale "no programmatic API-key scheme" callout in
+  the API reference to say the session-cookie routes power the dashboard UI while
+  `/api/v1` is the integration path for third-party servers.
+- **Verification:** `npm run build` (`prisma generate && next build`) → exit 0;
+  the management routes, the `/dashboard/api-keys` page, and the edited
+  sidebar/docs page compile. Live key-lifecycle proof against Turso: create →
+  plaintext `wa_live_…` returned once and the stored row holds only
+  `keyHash`+`keyPrefix` (no plaintext column); authenticate a `/api/v1` call →
+  200; revoke → re-call → 401. `grep -rn "wa_live_|keyHash" src` shows only the
+  `PREFIX` constant and `keyHash` as a Prisma field/compare — no secret is logged.
 
 ### 2026-10-17 (public API / M2M — FEAT-002: public /api/v1 surface + send refactor)
 

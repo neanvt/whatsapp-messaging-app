@@ -34,11 +34,15 @@ export default function DocsPage() {
     { id: "access-token", label: "3. How to get a WhatsApp access token" },
     { id: "connecting", label: "4. Connecting a number in this app" },
     { id: "sending", label: "5. Sending messages" },
-    { id: "receiving", label: "6. Receiving data (webhook)" },
-    { id: "api-reference", label: "7. API reference" },
-    { id: "walkthrough", label: "8. Integration walkthrough" },
-    { id: "env", label: "9. Environment / configuration reference" },
-    { id: "troubleshooting", label: "10. Troubleshooting" },
+    {
+      id: "m2m-api",
+      label: "6. Connect a third-party application (Server-to-server API)",
+    },
+    { id: "receiving", label: "7. Receiving data (webhook)" },
+    { id: "api-reference", label: "8. API reference" },
+    { id: "walkthrough", label: "9. Integration walkthrough" },
+    { id: "env", label: "10. Environment / configuration reference" },
+    { id: "troubleshooting", label: "11. Troubleshooting" },
   ];
 
   return (
@@ -382,13 +386,227 @@ export default function DocsPage() {
           </div>
         </section>
 
-        {/* 6. Receiving */}
+        {/* 6. Connect a third-party application (Server-to-server API) */}
+        <section
+          id="m2m-api"
+          className="bg-white rounded-lg shadow-sm border p-8 space-y-5 scroll-mt-6"
+        >
+          <h2 className="text-2xl font-bold text-gray-900">
+            6. Connect a third-party application (Server-to-server API)
+          </h2>
+          <p className="text-gray-700 leading-relaxed">
+            The public <code className="font-mono text-sm">/api/v1</code> API lets
+            your own backend send messages and read data without ever touching a
+            Meta credential, a Phone Number ID, or a WABA ID. You mint an API key
+            in the dashboard, bind it to one of your verified numbers, and your
+            third-party server authenticates with just that key.
+          </p>
+
+          <div className="space-y-2">
+            <h3 className="text-lg font-semibold text-gray-900">
+              Create a key
+            </h3>
+            <ol className="list-decimal list-inside space-y-1 text-gray-700 pl-2">
+              <li>
+                Go to <strong>Dashboard → API Keys</strong>.
+              </li>
+              <li>
+                Give the key a name and pick one of your{" "}
+                <strong>verified</strong> numbers to bind it to.
+              </li>
+              <li>
+                Click <strong>Create key</strong> and copy the{" "}
+                <code className="font-mono text-sm">wa_live_…</code> secret. It is
+                shown <strong>once</strong> — if you lose it, revoke the key and
+                create a new one.
+              </li>
+            </ol>
+          </div>
+
+          <div className="bg-blue-50 border border-blue-200 rounded-md p-4 text-sm text-blue-900 space-y-2">
+            <p className="font-semibold">The bearer scheme</p>
+            <p>
+              Send the key on every request as{" "}
+              <code className="font-mono">
+                Authorization: Bearer wa_live_xxx
+              </code>
+              . Your third party supplies <strong>zero</strong> Meta credentials
+              and <strong>zero</strong> number information — the key is bound to a
+              number server-side, so the platform fills in the Phone Number ID and
+              decrypted token for you. A key only ever acts on its owner&apos;s
+              data; it can never read or send for another tenant.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="text-lg font-semibold text-gray-900">
+              Lifecycle
+            </h3>
+            <ul className="list-disc list-inside space-y-1 text-gray-700 pl-2">
+              <li>The plaintext key is revealed once, at creation.</li>
+              <li>
+                Revoke a key from <strong>Dashboard → API Keys</strong>; a revoked
+                key returns <code className="font-mono text-sm">401</code>{" "}
+                immediately.
+              </li>
+              <li>
+                To point a key at a different number, revoke it and create a new
+                one (the number binding is fixed at creation).
+              </li>
+            </ul>
+          </div>
+
+          {/* POST /api/v1/messages */}
+          <div className="space-y-2 border-t pt-5">
+            <h3 className="text-lg font-semibold text-gray-900">
+              <Method>POST</Method>/api/v1/messages
+            </h3>
+            <p className="text-gray-700">
+              <strong>Auth:</strong> API key (Bearer). Sends an approved template
+              through the key&apos;s bound number. Costs 1 credit on success
+              (refunded on failure; superadmins exempt).
+            </p>
+            <p className="text-gray-700">
+              <strong>Body (JSON):</strong>{" "}
+              <code className="font-mono text-sm">recipient</code> (string, req —
+              phone, non-digits are stripped), exactly one of{" "}
+              <code className="font-mono text-sm">templateName</code> or{" "}
+              <code className="font-mono text-sm">templateId</code> (string, req —
+              an approved template you own),{" "}
+              <code className="font-mono text-sm">variables</code> (string[],
+              optional — for authentication templates,{" "}
+              <code className="font-mono text-sm">variables[0]</code> must be the
+              OTP code). There is no number field — the bound number is always
+              used.
+            </p>
+            <CodeBlock>{`curl -X POST https://your-app.com/api/v1/messages \\
+  -H "Authorization: Bearer wa_live_xxxxxxxx" \\
+  -H "Content-Type: application/json" \\
+  -d '{"recipient":"15551234567","templateName":"order_update","variables":["1234"]}'`}</CodeBlock>
+            <p className="text-gray-700">
+              <strong>200:</strong>
+            </p>
+            <CodeBlock>{`{ "id": "msg_789", "status": "sent", "metaMessageId": "wamid.XXXX" }`}</CodeBlock>
+            <p className="text-gray-700 text-sm">
+              <strong>Errors:</strong> 401 missing/invalid key; 400 invalid body
+              (missing recipient, not exactly one of templateName/templateId, or a
+              missing OTP variable) or the template exists but is not approved; 402
+              insufficient credits (before contacting Meta); 404 the template is
+              not found for your account; 500 the bound number is not connected or
+              Meta rejected the send (the credit is refunded).
+            </p>
+          </div>
+
+          {/* GET /api/v1/messages/[id] */}
+          <div className="space-y-2 border-t pt-5">
+            <h3 className="text-lg font-semibold text-gray-900">
+              <Method>GET</Method>/api/v1/messages/[id]
+            </h3>
+            <p className="text-gray-700">
+              <strong>Auth:</strong> API key (Bearer). Returns the status of one
+              message sent through the key&apos;s bound number.
+            </p>
+            <CodeBlock>{`curl https://your-app.com/api/v1/messages/MESSAGE_ID \\
+  -H "Authorization: Bearer wa_live_xxxxxxxx"`}</CodeBlock>
+            <p className="text-gray-700">
+              <strong>200:</strong>
+            </p>
+            <CodeBlock>{`{
+  "id": "msg_789",
+  "status": "delivered",
+  "recipientPhone": "15551234567",
+  "metaMessageId": "wamid.XXXX",
+  "errorMessage": null,
+  "sentAt": "2026-10-13T12:00:00.000Z",
+  "deliveredAt": "2026-10-13T12:00:03.000Z",
+  "readAt": null,
+  "createdAt": "2026-10-13T12:00:00.000Z"
+}`}</CodeBlock>
+            <p className="text-gray-700 text-sm">
+              <strong>Errors:</strong> 401 missing/invalid key; 404 unknown
+              message id (an id that does not exist, or one owned by another
+              user/number, returns the same 404 — no existence oracle).
+            </p>
+          </div>
+
+          {/* GET /api/v1/templates */}
+          <div className="space-y-2 border-t pt-5">
+            <h3 className="text-lg font-semibold text-gray-900">
+              <Method>GET</Method>/api/v1/templates
+            </h3>
+            <p className="text-gray-700">
+              <strong>Auth:</strong> API key (Bearer). Lists your templates so the
+              integration can see which are usable.{" "}
+              <strong>Query (optional):</strong>{" "}
+              <code className="font-mono text-sm">status</code> (one of{" "}
+              <code className="font-mono text-sm">draft</code>,{" "}
+              <code className="font-mono text-sm">pending</code>,{" "}
+              <code className="font-mono text-sm">submitted</code>,{" "}
+              <code className="font-mono text-sm">approved</code>,{" "}
+              <code className="font-mono text-sm">rejected</code>).
+            </p>
+            <CodeBlock>{`curl "https://your-app.com/api/v1/templates?status=approved" \\
+  -H "Authorization: Bearer wa_live_xxxxxxxx"`}</CodeBlock>
+            <p className="text-gray-700">
+              <strong>200:</strong>
+            </p>
+            <CodeBlock>{`[
+  { "id": "tpl_456", "name": "order_update", "category": "utility", "language": "en", "status": "approved" }
+]`}</CodeBlock>
+            <p className="text-gray-700 text-sm">
+              <strong>Errors:</strong> 401 missing/invalid key; 400 an unknown{" "}
+              <code className="font-mono">status</code> value.
+            </p>
+          </div>
+
+          <div className="space-y-2 border-t pt-5">
+            <h3 className="text-lg font-semibold text-gray-900">
+              Status codes
+            </h3>
+            <ul className="list-disc list-inside space-y-1 text-gray-700 pl-2">
+              <li>
+                <strong>401</strong> — missing/malformed{" "}
+                <code className="font-mono text-sm">Authorization</code> header, a
+                token not matching the <code className="font-mono text-sm">
+                  wa_live_
+                </code>{" "}
+                shape, an unknown key, or a revoked key.
+              </li>
+              <li>
+                <strong>400</strong> — body validation failure (missing{" "}
+                <code className="font-mono text-sm">recipient</code>, not exactly
+                one of <code className="font-mono text-sm">templateName</code>/
+                <code className="font-mono text-sm">templateId</code>, a bad{" "}
+                <code className="font-mono text-sm">?status</code>), a resolved
+                template that is not approved, or a missing OTP variable on an
+                authentication-category template.
+              </li>
+              <li>
+                <strong>402</strong> — insufficient credits (non-superadmin,
+                balance ≤ 0), returned before contacting Meta.
+              </li>
+              <li>
+                <strong>404</strong> — unknown message id (or one not owned by the
+                key&apos;s user/number), or a template not found for the given
+                name/id.
+              </li>
+              <li>
+                <strong>500</strong> — the send failed and the credit was
+                refunded: either the bound number is not connected (&quot;WhatsApp
+                number is not connected. Reconnect it to send messages.&quot;) or
+                Meta returned a non-2xx error.
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        {/* 7. Receiving */}
         <section
           id="receiving"
           className="bg-white rounded-lg shadow-sm border p-8 space-y-5 scroll-mt-6"
         >
           <h2 className="text-2xl font-bold text-gray-900">
-            6. Receiving data (webhook)
+            7. Receiving data (webhook)
           </h2>
           <p className="text-gray-700 leading-relaxed">
             Meta delivers delivery/read/failed statuses and inbound messages to a
@@ -460,12 +678,12 @@ export default function DocsPage() {
           </ul>
         </section>
 
-        {/* 7. API reference */}
+        {/* 8. API reference */}
         <section
           id="api-reference"
           className="bg-white rounded-lg shadow-sm border p-8 space-y-6 scroll-mt-6"
         >
-          <h2 className="text-2xl font-bold text-gray-900">7. API reference</h2>
+          <h2 className="text-2xl font-bold text-gray-900">8. API reference</h2>
 
           <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4 text-sm text-yellow-900 space-y-2">
             <p className="font-semibold">Authentication model — read first</p>
@@ -474,13 +692,19 @@ export default function DocsPage() {
               session-guarded Next.js route handler using{" "}
               <code className="font-mono">getServerSession</code>. Calls are
               authenticated by the <strong>NextAuth session cookie</strong>, not
-              by a bearer token or API key. There is currently{" "}
-              <strong>no programmatic API-key scheme</strong>. To call these
-              endpoints from your own backend, you must first log in through the
-              NextAuth credentials flow and reuse the returned session cookie. The
-              curl examples below assume you pass that cookie via{" "}
-              <code className="font-mono">--cookie</code>. A request with no valid
+              by a bearer token or API key. These session-cookie routes power the{" "}
+              <strong>dashboard UI</strong>. To call them from your own backend
+              you would log in through the NextAuth credentials flow and reuse the
+              returned session cookie (the curl examples below pass it via{" "}
+              <code className="font-mono">--cookie</code>); a request with no valid
               session returns <code className="font-mono">401 Unauthorized</code>.
+              For <strong>server-to-server integration</strong>, use the{" "}
+              <a href="#m2m-api" className="text-blue-600 hover:underline">
+                public <code className="font-mono">/api/v1</code> API
+              </a>{" "}
+              instead — it authenticates with a per-tenant API key over a{" "}
+              <code className="font-mono">Bearer</code> token, so your backend
+              never needs a session cookie or any Meta credential.
             </p>
           </div>
 
@@ -1003,7 +1227,7 @@ export default function DocsPage() {
           className="bg-white rounded-lg shadow-sm border p-8 space-y-4 scroll-mt-6"
         >
           <h2 className="text-2xl font-bold text-gray-900">
-            8. Integration walkthrough
+            9. Integration walkthrough
           </h2>
           <p className="text-gray-700 leading-relaxed">
             An end-to-end example, from zero to a delivered message:
@@ -1081,7 +1305,7 @@ export default function DocsPage() {
           className="bg-white rounded-lg shadow-sm border p-8 space-y-4 scroll-mt-6"
         >
           <h2 className="text-2xl font-bold text-gray-900">
-            9. Environment / configuration reference
+            10. Environment / configuration reference
           </h2>
           <p className="text-gray-700 leading-relaxed">
             These are environment variable <strong>names only</strong> — never
@@ -1154,13 +1378,13 @@ export default function DocsPage() {
           </div>
         </section>
 
-        {/* 10. Troubleshooting */}
+        {/* 11. Troubleshooting */}
         <section
           id="troubleshooting"
           className="bg-white rounded-lg shadow-sm border p-8 space-y-4 scroll-mt-6"
         >
           <h2 className="text-2xl font-bold text-gray-900">
-            10. Troubleshooting
+            11. Troubleshooting
           </h2>
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left border-collapse">
