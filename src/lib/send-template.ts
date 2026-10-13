@@ -299,7 +299,7 @@ export async function sendTemplateMessage(
         });
       } else if (
         template.category !== "authentication" &&
-        buttonUrlIsDynamic(template.buttons)
+        (buttonUrlIsDynamic(template.buttons) || Boolean(buttonParam || buttonUrlParam))
       ) {
         // Dynamic URL button (general, structure-driven). The pre-charge gate
         // guaranteed buttonParam is present when the button is dynamic. No
