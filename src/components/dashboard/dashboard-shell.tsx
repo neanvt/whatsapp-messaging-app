@@ -48,11 +48,15 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    // Lock the shell to the viewport height and hide its own overflow so the
+    // sidebar (a static column at lg+) stays fixed in place; ONLY the <main>
+    // area scrolls. This keeps the sidebar and footer independent of the
+    // scrolling content area.
+    <div className="flex h-screen overflow-hidden bg-gray-50">
       <Sidebar isOpen={open} onClose={() => setOpen(false)} />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Header isOpen={open} onMenuClick={() => setOpen((v) => !v)} />
-        <main className="flex min-w-0 flex-1 flex-col p-4 sm:p-6">
+        <main className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6">
           {children}
         </main>
         <Footer />

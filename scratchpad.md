@@ -582,6 +582,17 @@ There is no test runner installed; these two checks are the full gate.
 
 ## Change log
 
+### 2026-10-19 (b) — Sidebar/footer independent of scrolling content
+- Fixed the dashboard shell so the Sidebar and Footer no longer scroll away with
+  page content. `dashboard-shell.tsx` is now `h-screen overflow-hidden`; the
+  content column is `overflow-hidden` and ONLY `<main>` scrolls (`overflow-y-auto`).
+  The Sidebar is a full-viewport-height (`h-screen` / `lg:h-screen`) fixed column
+  with its own `overflow-y-auto` nav, so the brand + nav + Docs/Settings links stay
+  anchored while the main area scrolls independently.
+- Confirmed the `/docs` page already documents the new API-key / M2M `/api/v1`
+  setup (Bearer auth, create/revoke lifecycle, the three endpoints) — no stale
+  docs to update.
+
 ### 2026-10-19 (public API / M2M — cross-FEAT integration verification)
 
 - Ran full cross-FEAT verification for FEAT-001/002/003: `npm run build`

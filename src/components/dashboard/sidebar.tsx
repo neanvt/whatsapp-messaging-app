@@ -49,15 +49,16 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       <div
         className={cn(
           "fixed inset-y-0 left-0 z-40 flex w-64 flex-col bg-gray-900 text-white",
+          "h-screen", // full viewport height so the column fills the screen and stays put
           "transition-transform duration-200 ease-in-out",
           isOpen ? "translate-x-0" : "-translate-x-full",
-          "lg:static lg:z-auto lg:min-h-screen lg:translate-x-0",
+          "lg:static lg:z-auto lg:h-screen lg:translate-x-0",
         )}
       >
         <div className="p-6">
           <h1 className="text-xl font-bold">WhatsApp Business</h1>
         </div>
-        <nav className="flex-1 px-4 space-y-1">
+        <nav className="flex-1 overflow-y-auto px-4 space-y-1">
           {navigation.map((item) => {
             const isActive =
               pathname === item.href || pathname.startsWith(item.href + "/");
