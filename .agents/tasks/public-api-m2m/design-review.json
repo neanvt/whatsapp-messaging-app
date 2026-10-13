@@ -1,0 +1,27 @@
+{
+  "verdict": "APPROVED",
+  "findings": [
+    {
+      "id": 1,
+      "severity": "NIT",
+      "location": "design.md \u00a76.4 (dashboard page create form)",
+      "problem": "The create form is said to fetch verified numbers from GET /api/numbers but the response shape is not pinned. The live route (src/app/api/numbers/route.ts) returns a bare WhatsAppNumber[] (accessToken stripped), not an envelope like { numbers: [...] }.",
+      "fix": "Add to \u00a76.4: 'GET /api/numbers returns a bare WhatsAppNumber[] (accessToken stripped); filter client-side on verificationStatus === \"verified\".'"
+    },
+    {
+      "id": 2,
+      "severity": "NIT",
+      "location": "design.md \u00a71.1 (Prisma model relations)",
+      "problem": "ApiKey adds whatsappNumber/apiKeys relations to WhatsAppNumber, which already has unnamed Template.whatsappNumber and Message.whatsappNumber relations. The design does not state the new relation is unnamed (default inference), so an implementer might add a spurious @relation(\"name\").",
+      "fix": "In \u00a71.1 note: 'both new relations are unnamed (default inference), matching the existing unnamed User/WhatsAppNumber relations; no @relation(\"name\") is required.'"
+    },
+    {
+      "id": 3,
+      "severity": "NIT",
+      "location": "design.md \u00a75.3 (?status validation KNOWN set)",
+      "problem": "The ?status allow-list hardcodes draft|pending|submitted|approved|rejected, duplicating the Template.status comment in schema.prisma. The two can drift silently if a status is added.",
+      "fix": "Add a comment in \u00a75.3: 'KNOWN mirrors the Template.status comment in schema.prisma; keep in sync if the schema adds a status.'"
+    }
+  ],
+  "reviewDoc": "/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/.agents/tasks/public-api-m2m/design-review.md"
+}

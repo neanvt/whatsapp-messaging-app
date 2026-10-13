@@ -1,0 +1,7 @@
+{
+  "task_id": "task-public-api-m2m",
+  "task_description": "Add a machine-to-machine public API under /api/v1 authenticated by per-tenant API keys (Authorization: Bearer wa_live_xxx). Introduce an ApiKey model + idempotent libSQL migration, pure key helpers, an auth helper, a shared sendTemplateMessage extracted from the session send route (keeping that route behavior-identical), three public routes (send template / message status / list templates), dashboard key-management routes + a mobile-responsive management page + sidebar link, and a developer-docs M2M section. No new dependencies; migration via @libsql/client script only.",
+  "status": "pending",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003"],
+  "blocked_reason": null
+}
