@@ -191,7 +191,7 @@ export async function sendTemplateMessage(
     const components: object[] = [];
     let docUrl = documentUrl || mediaUrl;
     const headerType = (template.headerType || "").toLowerCase();
-    const resolvedFilename = fileName || filename || "receipt.pdf";
+    const resolvedFilename = fileName || filename || (headerType === "image" ? "invitation.jpg" : "receipt.pdf");
     const rawBase64 = documentBase64 || pdfBase64 || mediaBase64;
 
     if (rawBase64) {
@@ -206,7 +206,10 @@ export async function sendTemplateMessage(
           sql: "INSERT INTO MediaStore (id, mimeType, filename, dataBase64, createdAt) VALUES (?, ?, ?, ?, ?)",
           args: [mid, mimeType, resolvedFilename, rawBase64, new Date().toISOString()],
         });
-        const appBase = process.env.NEXTAUTH_URL || "https://wa-neanv.vercel.app";
+        const rawAppBase = (process.env.APP_URL || process.env.NEXTAUTH_URL || "https://wa-neanv.vercel.app").replace(/\/+$/, "");
+        const appBase = (rawAppBase.includes("localhost") || rawAppBase.includes("127.0.0.1"))
+          ? "https://wa-neanv.vercel.app"
+          : rawAppBase;
         docUrl = `${appBase.replace(/\/+$/, "")}/api/v1/media/${mid}`;
         console.log("[Send] Stored base64 in MediaStore, docUrl:", docUrl);
       } catch (storeErr) {
