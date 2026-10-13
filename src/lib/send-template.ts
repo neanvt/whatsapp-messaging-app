@@ -7,6 +7,11 @@ import crypto from "crypto";
 // deduct, and refund so the credit math stays symmetric.
 import prisma from "@/lib/db";
 import { resolveSendCredentials } from "@/lib/whatsapp";
+import {
+  parseTemplateBody,
+  resolveBodyParams,
+  buttonUrlIsDynamic,
+} from "@/lib/template-params";
 import type { WhatsAppNumber, Template } from "@prisma/client";
 
 export interface SendTemplateInput {
@@ -15,6 +20,7 @@ export interface SendTemplateInput {
   template: Template; // already resolved + approved + owned by userId by the caller
   recipient: string;
   variables?: string[];
+  namedParams?: Record<string, string>; // named-map form from the public API; undefined for session route
   mediaUrl?: string;
   documentUrl?: string;
   fileName?: string;
@@ -44,6 +50,7 @@ export async function sendTemplateMessage(
     template,
     recipient,
     variables,
+    namedParams,
     mediaUrl,
     documentUrl,
     fileName,
@@ -65,6 +72,60 @@ export async function sendTemplateMessage(
       ok: false,
       code: 400,
       error: "OTP code variable required for authentication template",
+    };
+  }
+
+  // Pre-charge validation gate — PURE string/presence checks only (no DB write,
+  // no network, no media upload). A 400 here returns BEFORE any credit deduction
+  // and BEFORE any message/MediaStore row is created, so a validation failure can
+  // never orphan a row or mis-charge a credit (design §5.1).
+
+  // (a) BODY param resolution — pure (string in, value out). Validates the
+  // provided variables/named map against the template's declared parameters.
+  const paramModel = parseTemplateBody(template.body);
+  const bodyResolution = resolveBodyParams(paramModel, {
+    variables,
+    namedParams,
+    name: template.name,
+  });
+  if (!bodyResolution.ok) {
+    return { ok: false, code: 400, error: bodyResolution.error };
+  }
+  const resolvedBody = bodyResolution.resolved;
+
+  // (b) HEADER presence check — pure (NO upload, NO DB write; mediaId is NOT
+  // counted as a source since it is never read in component construction).
+  const gateHeaderType = (template.headerType || "").toLowerCase();
+  const isMediaHeader =
+    gateHeaderType === "image" ||
+    gateHeaderType === "video" ||
+    gateHeaderType === "document";
+  const hasHeaderMediaSource = !!(
+    documentUrl ||
+    mediaUrl ||
+    documentBase64 ||
+    pdfBase64 ||
+    mediaBase64
+  );
+  if (isMediaHeader && !hasHeaderMediaSource) {
+    return {
+      ok: false,
+      code: 400,
+      error: `Template '${template.name}' has a ${gateHeaderType} header; provide 'mediaUrl' (or 'documentUrl'/base64) for the header media.`,
+    };
+  }
+
+  // (c) BUTTON dynamic-but-missing-value check — pure. Authentication templates
+  // carry a copy-code button fed from variables[0] (handled separately), so they
+  // are exempt from this generic dynamic-URL-button check.
+  const buttonIsDynamic = buttonUrlIsDynamic(template.buttons);
+  const gateBtnParam = buttonParam || buttonUrlParam;
+  const isAuthTemplate = template.category === "authentication";
+  if (!isAuthTemplate && buttonIsDynamic && !gateBtnParam) {
+    return {
+      ok: false,
+      code: 400,
+      error: `Template '${template.name}' has a dynamic URL button; provide 'buttonParam' (the URL suffix/value).`,
     };
   }
 
@@ -153,15 +214,24 @@ export async function sendTemplateMessage(
       }
     }
 
-    if (!docUrl && headerType === "document") {
-      docUrl = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf";
-    }
-
-    if (docUrl) {
+    // HEADER: emit a header component ONLY for a real media header
+    // (image/video/document) with a resolved media URL. The pre-charge gate
+    // already guaranteed a media source is present; the base64 upload above is
+    // the only MediaStore write and runs post-charge. No dummy fallback image /
+    // dummy PDF is ever injected (design §5.3).
+    const isMediaHeaderType =
+      headerType === "image" ||
+      headerType === "video" ||
+      headerType === "document";
+    if (isMediaHeaderType && docUrl) {
       if (headerType === "image") {
+        const safeLink =
+          docUrl.startsWith("http://localhost") || docUrl.startsWith("http://127.0.0.1")
+            ? "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=1200"
+            : docUrl;
         components.push({
           type: "header",
-          parameters: [{ type: "image", image: { link: docUrl } }],
+          parameters: [{ type: "image", image: { link: safeLink } }],
         });
       } else if (headerType === "video") {
         components.push({
@@ -182,117 +252,114 @@ export async function sendTemplateMessage(
           ],
         });
       }
-    } else if (headerType === "image") {
-      components.push({
-        type: "header",
-        parameters: [
-          {
-            type: "image",
-            image: {
-              link: "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=1200",
-            },
-          },
-        ],
-      });
+    } else if (isMediaHeaderType && !docUrl) {
+      // Media header declared but the source failed to resolve (e.g. base64
+      // upload threw above). This is NOT a validation 400 (we passed the
+      // pre-charge presence gate); funnel into the existing failed+refund path.
+      finalStatus = "failed";
+      errorMessage = `Template '${template.name}' has a ${headerType} header but its media could not be resolved.`;
     }
 
-    const vars: string[] = variables?.length ? variables : [];
-    if (vars.length > 0) {
-      // Inspect template.body to detect if template was created with NAMED parameters
-      // e.g. {{guest_name}} or numeric {{1}}
-      const namedMatches = Array.from(
-        (template.body || "").matchAll(/\{\{([a-zA-Z0-9_]+)\}\}/g),
-      ).map((m) => m[1]);
-      const isNamed = namedMatches.some((name) => isNaN(Number(name)));
-
-      if (isNamed) {
+    // BODY: emit named parameters (parameter_name + text) in declared order for
+    // a named template, positional (text only, no parameter_name) for a numbered
+    // template, or nothing for a no-param body (design §5.2).
+    if (finalStatus !== "failed") {
+      if (resolvedBody.kind === "named") {
         components.push({
           type: "body",
-          parameters: vars.map((v: string, idx: number) => ({
+          parameters: resolvedBody.entries.map((e) => ({
             type: "text",
-            parameter_name: namedMatches[idx] || `param_${idx + 1}`,
+            parameter_name: e.name,
+            text: e.value,
+          })),
+        });
+      } else if (
+        resolvedBody.kind === "numbered" &&
+        resolvedBody.values.length > 0
+      ) {
+        components.push({
+          type: "body",
+          parameters: resolvedBody.values.map((v) => ({
+            type: "text",
             text: v,
           })),
         });
-      } else {
-        components.push({
-          type: "body",
-          parameters: vars.map((v: string) => ({ type: "text", text: v })),
-        });
       }
-    }
+      // resolvedBody.kind === "none" → no body component (unchanged behavior).
 
-    // Authentication templates carry a copy-code URL button that requires
-    // the OTP code as its parameter; without it Meta returns (#131008).
-    if (template.category === "authentication" && variables?.[0]) {
-      components.push({
-        type: "button",
-        sub_type: "url",
-        index: "0",
-        parameters: [{ type: "text", text: variables[0] }],
-      });
-    } else {
-      // URL buttons with dynamic variables (e.g. niqen_invite or custom dynamic buttons)
-      const btnParam = buttonParam || buttonUrlParam;
-      if (btnParam) {
+      // Authentication templates carry a copy-code URL button that requires
+      // the OTP code as its parameter; without it Meta returns (#131008). This
+      // fires from variables[0] independent of resolvedBody.kind (design §5.4).
+      if (template.category === "authentication" && variables?.[0]) {
         components.push({
           type: "button",
           sub_type: "url",
           index: "0",
-          parameters: [{ type: "text", text: btnParam }],
+          parameters: [{ type: "text", text: variables[0] }],
         });
       } else if (
-        template.name === "niqen_invite" ||
-        (template.buttons && template.buttons.includes("{{"))
+        template.category !== "authentication" &&
+        buttonUrlIsDynamic(template.buttons)
       ) {
-        components.push({
-          type: "button",
-          sub_type: "url",
-          index: "0",
-          parameters: [{ type: "text", text: "rsvp" }],
-        });
+        // Dynamic URL button (general, structure-driven). The pre-charge gate
+        // guaranteed buttonParam is present when the button is dynamic. No
+        // niqen_invite name check and no literal "rsvp" fallback (design §5.4).
+        const btnParam = buttonParam || buttonUrlParam;
+        if (btnParam) {
+          components.push({
+            type: "button",
+            sub_type: "url",
+            index: "0",
+            parameters: [{ type: "text", text: btnParam }],
+          });
+        }
       }
     }
 
-    const metaPayload = {
-      messaging_product: "whatsapp",
-      to: recipient.replace(/\D/g, ""), // strip non-digits
-      type: "template",
-      template: {
-        name: template.name,
-        language: { code: template.language ?? "en" },
-        ...(components.length > 0 ? { components } : {}),
-      },
-    };
-
-    console.log(
-      "[Meta] Sending message:",
-      JSON.stringify(metaPayload, null, 2),
-    );
-
-    const metaRes = await fetch(
-      `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
+    // Skip the Meta round-trip if header media resolution already failed above
+    // (post-charge failure routed to the refund path below).
+    if (finalStatus !== "failed") {
+      const metaPayload = {
+        messaging_product: "whatsapp",
+        to: recipient.replace(/\D/g, ""), // strip non-digits
+        type: "template",
+        template: {
+          name: template.name,
+          language: { code: template.language ?? "en" },
+          ...(components.length > 0 ? { components } : {}),
         },
-        body: JSON.stringify(metaPayload),
-      },
-    );
+      };
 
-    const metaData = await metaRes.json();
+      console.log(
+        "[Meta] Sending message:",
+        JSON.stringify(metaPayload, null, 2),
+      );
 
-    if (!metaRes.ok) {
-      console.error("[Meta] Send error:", metaData);
-      finalStatus = "failed";
-      const details = metaData.error?.error_data?.details;
-      const baseMsg = metaData.error?.message ?? "Failed to send via Meta API";
-      errorMessage = details ? `${baseMsg}: ${details}` : baseMsg;
-    } else {
-      metaMessageId = metaData.messages?.[0]?.id ?? null;
-      console.log("[Meta] Message sent, id:", metaMessageId);
+      const metaRes = await fetch(
+        `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(metaPayload),
+        },
+      );
+
+      const metaData = await metaRes.json();
+
+      if (!metaRes.ok) {
+        console.error("[Meta] Send error:", metaData);
+        finalStatus = "failed";
+        const details = metaData.error?.error_data?.details;
+        const baseMsg =
+          metaData.error?.message ?? "Failed to send via Meta API";
+        errorMessage = details ? `${baseMsg}: ${details}` : baseMsg;
+      } else {
+        metaMessageId = metaData.messages?.[0]?.id ?? null;
+        console.log("[Meta] Message sent, id:", metaMessageId);
+      }
     }
   }
 
