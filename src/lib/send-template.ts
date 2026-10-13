@@ -191,13 +191,15 @@ export async function sendTemplateMessage(
     const components: object[] = [];
     let docUrl = documentUrl || mediaUrl;
     const headerType = (template.headerType || "").toLowerCase();
-    const resolvedFilename = fileName || filename || (headerType === "image" ? "invitation.jpg" : "receipt.pdf");
     const rawBase64 = documentBase64 || pdfBase64 || mediaBase64;
+    const cleanBase64 = rawBase64 ? rawBase64.replace(/^data:[^;]+;base64,/, "") : "";
+    const isPng = cleanBase64.startsWith("iVBORw0KGgo");
+    const resolvedFilename = fileName || filename || (headerType === "image" ? (isPng ? "invitation.png" : "invitation.jpg") : "receipt.pdf");
 
     if (rawBase64) {
       try {
         const mid = "med_" + crypto.randomUUID().replace(/-/g, "");
-        const mimeType = headerType === "image" ? "image/jpeg" : headerType === "video" ? "video/mp4" : "application/pdf";
+        const mimeType = headerType === "image" ? (isPng ? "image/png" : "image/jpeg") : headerType === "video" ? "video/mp4" : "application/pdf";
         const client = createClient({
           url: process.env.TURSO_DATABASE_URL!,
           authToken: process.env.TURSO_AUTH_TOKEN,
