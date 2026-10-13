@@ -1,6 +1,6 @@
 # WhatsApp Business Messaging Platform — Technical Reference
 
-Last updated: 2026-10-15
+Last updated: 2026-10-16
 
 ## Overview
 
@@ -474,6 +474,30 @@ There is no test runner installed; these two checks are the full gate.
   compile step or new dependency.
 
 ## Change log
+
+### 2026-10-16 (public API / M2M — FEAT-001: data layer + key helpers)
+
+- **New `ApiKey` Prisma model** in `prisma/schema.prisma` for machine-to-machine
+  public API auth. Fields: `id` (cuid), `userId` + cascade `user` relation,
+  `whatsappNumberId` + cascade `whatsappNumber` relation (immutable binding),
+  `name String?`, `keyPrefix` (non-secret display fragment), `keyHash String @unique`
+  (SHA-256 hex, never plaintext), `lastUsedAt?`, `revokedAt?`, `createdAt`,
+  `updatedAt`, `@@index([userId])`. Added inverse `apiKeys ApiKey[]` to `User` and
+  `WhatsAppNumber`. No standalone `@@index([keyHash])` (the `@unique` already
+  creates the lookup index).
+- **New `scripts/add-api-key-table.mjs`** — idempotent live-Turso migration cloned
+  from `add-tenant-meta-app-table.mjs` (manual `.env` parse, `@libsql/client`,
+  single `PRAGMA table_info` probe for the log line, three unconditional
+  `IF NOT EXISTS` DDL statements, `process.exit(1)` on error, `client.close()` in
+  `finally`). Creates the `ApiKey` table plus `ApiKey_keyHash_key` (unique) and
+  `ApiKey_userId_idx`. No FOREIGN KEY, no SQL timestamp defaults. Run against live
+  Turso; second run is a clean no-op. `prisma db push` is never used (libsql://).
+- **New `src/lib/api-key.ts`** — pure, DB-free helpers: `generateApiKey()`
+  (`wa_live_` + 32 random bytes base64url; returns `{plaintext, hash, prefix}`),
+  `hashKey()` (deterministic SHA-256 hex), `looksLikeApiKey()` (shape gate:
+  prefix + length ≥ 51), and `isSuperAdminUser({email, role})` (email override via
+  `SUPERADMIN_EMAIL` default `neanvtech@gmail.com`, OR `role === "superadmin"`).
+  Never logs plaintext/hash/random bytes. Foundation for FEAT-002/003.
 
 ### 2026-10-15 (dashboard layout refactor + mobile responsiveness)
 

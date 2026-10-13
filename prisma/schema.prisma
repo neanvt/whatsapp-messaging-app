@@ -30,6 +30,7 @@ model User {
   auditLogs      AuditLog[]
   conversations  Conversation[]
   tenantMetaApp  TenantMetaApp?
+  apiKeys        ApiKey[]
 }
 
 model TenantMetaApp {
@@ -77,6 +78,7 @@ model WhatsAppNumber {
   templates     Template[]
   messages      Message[]
   conversations Conversation[]
+  apiKeys       ApiKey[]
 }
 
 model Template {
@@ -200,4 +202,21 @@ model Package {
   sortOrder    Int      @default(0)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+model ApiKey {
+  id               String         @id @default(cuid())
+  userId           String
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  whatsappNumberId String
+  whatsappNumber   WhatsAppNumber @relation(fields: [whatsappNumberId], references: [id], onDelete: Cascade)
+  name             String?        // tenant-chosen display label
+  keyPrefix        String         // non-secret display fragment, e.g. "wa_live_ab12"
+  keyHash          String         @unique // SHA-256 hex of the full key; never plaintext
+  lastUsedAt       DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([userId])
 }
