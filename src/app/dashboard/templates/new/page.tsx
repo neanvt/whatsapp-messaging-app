@@ -303,7 +303,7 @@ export default function CreateTemplatePage() {
 
             <div className="space-y-2">
               <Label>Category</Label>
-              <div className="flex space-x-4">
+              <div className="flex flex-wrap gap-x-4 gap-y-2">
                 {["marketing", "utility", "authentication"].map((cat) => (
                   <label
                     key={cat}
@@ -540,7 +540,7 @@ export default function CreateTemplatePage() {
                       <X className="w-4 h-4" />
                     </button>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <select
                       className="w-full h-9 px-2 border rounded-md bg-white text-sm"
                       value={btn.type}
@@ -627,7 +627,7 @@ export default function CreateTemplatePage() {
                       <X className="w-4 h-4" />
                     </button>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <select
                       className="h-9 px-2 border rounded-md bg-white text-sm"
                       value={media.type}
@@ -660,7 +660,7 @@ export default function CreateTemplatePage() {
               ))}
             </div>
           </CardContent>
-          <div className="p-6 pt-0 flex space-x-4">
+          <div className="p-6 pt-0 flex flex-wrap gap-4">
             <Button
               type="button"
               variant="outline"

@@ -438,7 +438,7 @@ export default function TemplateDetailPage() {
   const editable = isEditable(template.status);
 
   const actionButtons = (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       {getStatusBadge(template.status)}
       <Button
         variant="outline"
@@ -490,7 +490,7 @@ export default function TemplateDetailPage() {
 
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <CardTitle className="text-xl">Edit Template</CardTitle>
                 <CardDescription>
@@ -525,7 +525,7 @@ export default function TemplateDetailPage() {
             {/* Category */}
             <div className="space-y-2">
               <Label>Category</Label>
-              <div className="flex space-x-4">
+              <div className="flex flex-wrap gap-x-4 gap-y-2">
                 {["marketing", "utility", "authentication"].map((cat) => (
                   <label
                     key={cat}
@@ -730,7 +730,7 @@ export default function TemplateDetailPage() {
                       <X className="w-4 h-4" />
                     </button>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <div>
                       <select
                         className="w-full h-9 px-2 border rounded-md bg-white text-sm"
@@ -819,7 +819,7 @@ export default function TemplateDetailPage() {
                       <X className="w-4 h-4" />
                     </button>
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                     <select
                       className="h-9 px-2 border rounded-md bg-white text-sm"
                       value={media.type}
@@ -845,7 +845,7 @@ export default function TemplateDetailPage() {
                       placeholder="URL"
                       value={media.url}
                       onChange={(e) => updateMedia(i, { url: e.target.value })}
-                      className="h-9 text-sm col-span-3"
+                      className="h-9 text-sm sm:col-span-3"
                     />
                   </div>
                 </div>
@@ -948,7 +948,7 @@ export default function TemplateDetailPage() {
 
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <CardTitle className="text-xl">{template.name}</CardTitle>
               <CardDescription>

@@ -204,7 +204,7 @@ export default function NumberDetailPage({ params }: NumberDetailPageProps) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 text-sm">
+          <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
             <div>
               <p className="text-muted-foreground">Added</p>
               <p className="font-medium">

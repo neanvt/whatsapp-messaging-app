@@ -1,6 +1,6 @@
 # WhatsApp Business Messaging Platform — Technical Reference
 
-Last updated: 2026-03-22
+Last updated: 2026-10-15
 
 ## Overview
 
@@ -81,6 +81,33 @@ Last updated: 2026-03-22
   disconnect to fall back to the platform app (Model A).
 - Audit logging.
 
+### Dashboard layout composition (shell + independent components)
+
+The dashboard chrome is split into independent, single-responsibility
+components, orchestrated by a thin client shell so the server layout keeps the
+auth boundary:
+
+| Component | File | Type | Responsibility |
+|---|---|---|---|
+| `DashboardLayout` | `src/app/dashboard/layout.tsx` | Server | `getServerSession` → `redirect("/login")` if no session; renders `<DashboardShell>{children}</DashboardShell>`. Holds no presentation state. |
+| `DashboardShell` | `src/components/dashboard/dashboard-shell.tsx` | Client | Owns the drawer `open` state and the three effects (close on `pathname` change; Escape-to-close + body-scroll-lock, both guarded to run only below `lg`; a `matchMedia("(min-width:1024px)")` `change` listener that force-closes on crossing into `lg+`). Lays out `Sidebar` + content column (`Header` → `main` → `Footer`). `main` is `flex min-w-0 flex-1 flex-col p-4 sm:p-6`. |
+| `Header` | `src/components/dashboard/header.tsx` | Client | Top bar; receives `isOpen` + `onMenuClick`. Hamburger (`lg:hidden`, `aria-label` + `aria-expanded`), truncating welcome text, email `hidden md:inline`, avatar + logout (`signOut({ callbackUrl: "/login" })`). |
+| `Sidebar` | `src/components/dashboard/sidebar.tsx` | Client | Nav + bottom links; receives `isOpen` + `onClose`. Backdrop (`fixed inset-0 z-30 bg-black/50 lg:hidden`) + panel (`fixed inset-y-0 left-0 z-40 w-64`, `-translate-x-full`/`translate-x-0`, `lg:static lg:translate-x-0`). Dark `bg-gray-900 text-white`. |
+| `Footer` | `src/components/dashboard/footer.tsx` | Client | Product name + `© {year}` copyright + links to `/docs` and `/privacy-policy`. White bar, `text-gray-500`, stacks `flex-col` then `sm:flex-row`. Rests at viewport bottom on short pages (flex column + `flex-1` main). |
+
+**Mobile-responsive strategy.** `lg` (1024px) is the single switch. At `lg+` the
+sidebar is the fixed visible `w-64` dark column and no hamburger shows. Below
+`lg` the sidebar is an off-canvas slide-in drawer opened by the Header
+hamburger, with a dimming overlay that closes on overlay click, Escape, or route
+change; body scroll is locked while open (and only below `lg`). Content pages
+stack first and widen up (`flex-col`→`sm:flex-row`, `flex-wrap`, `grid-cols-1`→
+`sm:grid-cols-*`): numbers/templates list cards and page header rows wrap, the
+messages table scrolls inside its `overflow-x-auto` container (page kept from
+widening via `min-w-0` on the content column + `main`), `messages/send` Compose +
+Preview is `grid-cols-1 lg:grid-cols-2`, and the chat page shows one panel at a
+time below `lg` (list when no `?contact=`, thread with an `ArrowLeft` back button
+when one is selected) while keeping both side by side at `lg+`.
+
 ### UI pages (dashboard)
 
 - `/dashboard/settings` — tabbed settings (client page) with three tabs:
@@ -109,7 +136,8 @@ Last updated: 2026-03-22
 
 ### Public pages
 
-- `/privacy-policy` — static server-rendered Privacy Policy page.
+- `/privacy-policy` — static server-rendered Privacy Policy page (real route;
+  linked from the login/register pages and the dashboard Footer).
 - `/docs` — **Developer Documentation** (server component, no client JS). Public
   integration guide at route `/docs`: Overview (Model A/B), prerequisites, how to
   get a WhatsApp access token (temporary / System User / Embedded Signup, with the
@@ -446,6 +474,56 @@ There is no test runner installed; these two checks are the full gate.
   compile step or new dependency.
 
 ## Change log
+
+### 2026-10-15 (dashboard layout refactor + mobile responsiveness)
+
+- **Refactored the dashboard shell into independent components and made every
+  dashboard screen mobile-responsive (presentation-only; no API/route/logic
+  change).**
+  - **New `src/components/dashboard/dashboard-shell.tsx`** (`"use client"`) — the
+    client shell that owns the drawer `open` state and the pathname-close,
+    Escape+scroll-lock (guarded below `lg`), and `matchMedia` resize-close
+    effects; composes `Sidebar` + (`Header` → `main` → `Footer`) with `main` as a
+    `flex min-w-0 flex-1 flex-col p-4 sm:p-6` column.
+  - **New `src/components/dashboard/footer.tsx`** (`"use client"`) — product name,
+    `© {year}` copyright, and links to `/docs` and `/privacy-policy` (both are
+    real routes). White bar, gray palette, `flex-col`→`sm:flex-row`.
+  - **`src/app/dashboard/layout.tsx`** — reduced to the server-side session gate
+    plus `return <DashboardShell>{children}</DashboardShell>`.
+  - **`header.tsx`** — added `isOpen`/`onMenuClick` props, a `lg:hidden` hamburger
+    with `aria-label` + `aria-expanded`, truncating welcome text, `hidden
+    md:inline` email, `aria-label="Log out"`.
+  - **`sidebar.tsx`** — now a backdrop + off-canvas panel keyed off `isOpen`
+    (`-translate-x-full`/`translate-x-0`, `lg:static lg:translate-x-0`); nav
+    items, active-highlight logic, and the two bottom links (`/docs`,
+    `/dashboard/settings`) preserved verbatim; dark palette unchanged.
+  - **`chat/page.tsx`** — root `flex min-h-0 flex-1` (dropped fixed `100vh`); list
+    wrapper `w-full lg:w-[340px]` with `contactParam ? "hidden lg:flex" :
+    "flex"`; placeholder branch `hidden lg:flex`; added a `lg:hidden` `ArrowLeft`
+    back button (`router.push("/dashboard/chat")`). Polling/send/search/new-chat
+    logic unchanged.
+  - **Content pages** — `numbers`, `templates`, `messages` header rows and card
+    action clusters now stack/wrap (`flex-col sm:flex-row`, `flex-wrap gap-2`);
+    `numbers/[id]` detail grid `grid-cols-1 sm:grid-cols-2`; `templates/new` and
+    `templates/[id]` inner grids `grid-cols-1 sm:grid-cols-*` and category/submit
+    rows `flex-wrap`; `settings` tab bar `flex-wrap`; `payments` balance row
+    `flex-col sm:flex-row`. `dashboard` home, `numbers/add`,
+    `numbers/[id]/verify`, `messages/send` were already responsive (verify-only).
+  - **Responsive behavior:** at ≥1024px the sidebar is a visible fixed `w-64`
+    column with no hamburger; below 1024px it is hidden and the Header hamburger
+    opens a left slide-in drawer with a dimming overlay that closes on nav click,
+    Escape, and overlay click, with body-scroll lock while open. Footer renders
+    on every dashboard route and sticks to the bottom on short pages.
+  - **Note:** the design doc assumed `/privacy-policy` was a dead route; it is in
+    fact a real page (`src/app/privacy-policy/page.tsx`), so the Footer links to
+    it as the authoritative task instruction required.
+  - **Verification:** `npm run build` (`prisma generate && next build`) → exit 0,
+    "✓ Compiled successfully" + "Linting and checking validity of types" passed.
+    No browser available; behavior cited from the exact Tailwind breakpoint
+    classes per component. The pre-existing "Dynamic server usage" messages from
+    API routes are unrelated to this change. `npm run lint` could not complete in
+    this environment (hangs on an interactive `next lint` config prompt,
+    pre-existing); the lint pass that runs inside `next build` succeeded.
 
 ### 2026-03-22
 

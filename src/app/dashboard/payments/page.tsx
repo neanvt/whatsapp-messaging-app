@@ -177,7 +177,7 @@ export default function PaymentsPage() {
         </p>
       </div>
 
-      <div className="mb-6 p-4 bg-gray-100 rounded-lg flex items-center justify-between">
+      <div className="mb-6 p-4 bg-gray-100 rounded-lg flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-sm text-muted-foreground">Current Balance</p>
           <p className="text-2xl font-bold">

@@ -285,7 +285,7 @@ export default function SettingsPage() {
     <div className="max-w-3xl mx-auto">
       <h1 className="text-2xl font-bold mb-6">Settings</h1>
       {/* Tabs */}
-      <div className="flex space-x-1 border-b mb-6">
+      <div className="flex flex-wrap space-x-1 border-b mb-6">
         <button
           onClick={() => setActiveTab("profile")}
           className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${

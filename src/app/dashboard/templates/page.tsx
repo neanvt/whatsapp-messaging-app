@@ -165,14 +165,14 @@ export default function TemplatesPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col gap-4 mb-6 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Message Templates</h1>
           <p className="text-muted-foreground">
             Create and manage your WhatsApp message templates
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             onClick={() => syncFromMeta(true)}
@@ -224,7 +224,7 @@ export default function TemplatesPage() {
         <div className="grid gap-4">
           {templates.map((template) => (
             <Card key={template.id}>
-              <CardContent className="flex items-center justify-between p-6">
+              <CardContent className="flex flex-col gap-4 p-6 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex items-start space-x-4 flex-1">
                   <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
                     <FileText className="w-6 h-6 text-gray-600" />
@@ -244,7 +244,7 @@ export default function TemplatesPage() {
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center space-x-3">
+                <div className="flex flex-wrap items-center gap-2">
                   {getStatusBadge(template.status)}
                   {template.status === "approved" && (
                     <Button variant="outline" size="sm" asChild>

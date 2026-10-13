@@ -82,7 +82,7 @@ export default function NumbersPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col gap-4 mb-6 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">WhatsApp Numbers</h1>
           <p className="text-muted-foreground">
@@ -118,7 +118,7 @@ export default function NumbersPage() {
         <div className="grid gap-4">
           {numbers.map((number) => (
             <Card key={number.id}>
-              <CardContent className="flex items-center justify-between p-6">
+              <CardContent className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center space-x-4">
                   <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center">
                     <Phone className="w-6 h-6 text-gray-600" />
@@ -139,7 +139,7 @@ export default function NumbersPage() {
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center space-x-4">
+                <div className="flex flex-wrap items-center gap-2">
                   {getStatusBadge(number.verificationStatus)}
                   {number.codeVerificationStatus && (
                     <Badge variant="outline">

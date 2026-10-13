@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Send, RefreshCw, MessageCircle, Search } from "lucide-react";
+import { Send, RefreshCw, MessageCircle, Search, ArrowLeft } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface Conversation {
   id: string;
@@ -298,9 +299,14 @@ export default function ChatPage() {
   );
 
   return (
-    <div className="flex h-[calc(100vh-0px)] bg-[#111B21] text-[#E9EDEF] overflow-hidden">
+    <div className="flex min-h-0 flex-1 bg-[#111B21] text-[#E9EDEF] overflow-hidden">
       {/* ============ LEFT PANEL — Conversation List ============ */}
-      <div className="w-[340px] min-w-[280px] flex flex-col border-r border-[#2A3942]">
+      <div
+        className={cn(
+          "flex flex-col border-r border-[#2A3942] w-full lg:w-[340px] lg:min-w-[280px]",
+          contactParam ? "hidden lg:flex" : "flex",
+        )}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 bg-[#202C33]">
           <h2 className="font-semibold text-lg">Chats</h2>
@@ -415,7 +421,7 @@ export default function ChatPage() {
 
       {/* ============ RIGHT PANEL — Chat Thread ============ */}
       {!contactParam ? (
-        <div className="flex-1 flex flex-col items-center justify-center bg-[#222E35] text-center p-8">
+        <div className="hidden lg:flex flex-1 flex-col items-center justify-center bg-[#222E35] text-center p-8">
           <div className="w-24 h-24 rounded-full bg-[#202C33] flex items-center justify-center mb-6">
             <MessageCircle className="w-12 h-12 text-[#00A884]" />
           </div>
@@ -435,6 +441,13 @@ export default function ChatPage() {
         <div className="flex-1 flex flex-col bg-[#0C1317] min-w-0">
           {/* Chat header */}
           <div className="flex items-center gap-3 px-4 py-3 bg-[#202C33] border-b border-[#2A3942]">
+            <button
+              onClick={() => router.push("/dashboard/chat")}
+              className="lg:hidden p-2 rounded-full hover:bg-[#2A3942] transition-colors flex-shrink-0"
+              aria-label="Back to conversations"
+            >
+              <ArrowLeft className="w-5 h-5 text-[#AEBAC1]" />
+            </button>
             <div className="w-10 h-10 rounded-full bg-[#6B7C85] flex items-center justify-center flex-shrink-0 text-white font-semibold">
               {(activeConversation?.contactName ?? contactParam)
                 .slice(0, 2)

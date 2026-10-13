@@ -1,33 +1,53 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { Bell, LogOut, User } from "lucide-react";
+import { Bell, LogOut, Menu, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export function Header() {
+interface HeaderProps {
+  isOpen: boolean;
+  onMenuClick: () => void;
+}
+
+export function Header({ isOpen, onMenuClick }: HeaderProps) {
   const { data: session } = useSession();
 
   return (
-    <header className="h-16 bg-white border-b flex items-center justify-between px-6">
-      <div>
-        <h2 className="text-lg font-semibold">Welcome back, {session?.user?.name}</h2>
-      </div>
-      <div className="flex items-center space-x-4">
-        <Button variant="ghost" size="icon">
-          <Bell className="w-5 h-5" />
+    <header className="flex h-16 items-center justify-between gap-2 border-b bg-white px-4 sm:px-6">
+      <div className="flex min-w-0 items-center gap-2">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="lg:hidden"
+          aria-label="Toggle navigation menu"
+          aria-expanded={isOpen}
+          onClick={onMenuClick}
+        >
+          <Menu className="h-5 w-5" />
         </Button>
-        <div className="flex items-center space-x-2">
-          <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center">
-            <User className="w-4 h-4 text-gray-500" />
+        <h2 className="truncate text-base font-semibold sm:text-lg">
+          Welcome back, {session?.user?.name}
+        </h2>
+      </div>
+      <div className="flex items-center gap-2 sm:gap-4">
+        <Button variant="ghost" size="icon">
+          <Bell className="h-5 w-5" />
+        </Button>
+        <div className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-200">
+            <User className="h-4 w-4 text-gray-500" />
           </div>
-          <span className="text-sm font-medium">{session?.user?.email}</span>
+          <span className="hidden text-sm font-medium md:inline">
+            {session?.user?.email}
+          </span>
         </div>
         <Button
           variant="ghost"
           size="icon"
           onClick={() => signOut({ callbackUrl: "/login" })}
+          aria-label="Log out"
         >
-          <LogOut className="w-5 h-5" />
+          <LogOut className="h-5 w-5" />
         </Button>
       </div>
     </header>
