@@ -194,7 +194,7 @@ export async function sendTemplateMessage(
     const resolvedFilename = fileName || filename || "receipt.pdf";
     const rawBase64 = documentBase64 || pdfBase64 || mediaBase64;
 
-    if (!docUrl && rawBase64) {
+    if (rawBase64) {
       try {
         const mid = "med_" + crypto.randomUUID().replace(/-/g, "");
         const mimeType = headerType === "image" ? "image/jpeg" : headerType === "video" ? "video/mp4" : "application/pdf";
