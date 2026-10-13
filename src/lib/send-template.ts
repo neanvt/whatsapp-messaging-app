@@ -17,6 +17,8 @@ export interface SendTemplateInput {
   documentUrl?: string;
   fileName?: string;
   filename?: string;
+  buttonParam?: string;
+  buttonUrlParam?: string;
   isSuperAdmin: boolean; // caller supplies; computed ONCE by the caller
 }
 
@@ -30,7 +32,20 @@ export type SendTemplateResult =
 export async function sendTemplateMessage(
   input: SendTemplateInput,
 ): Promise<SendTemplateResult> {
-  const { userId, number, template, recipient, variables, mediaUrl, documentUrl, fileName, filename, isSuperAdmin } = input;
+  const {
+    userId,
+    number,
+    template,
+    recipient,
+    variables,
+    mediaUrl,
+    documentUrl,
+    fileName,
+    filename,
+    buttonParam,
+    buttonUrlParam,
+    isSuperAdmin,
+  } = input;
 
   // Authentication templates require the OTP code as the first variable.
   // Guard here — before any message record or credit deduction — so a
@@ -76,7 +91,7 @@ export async function sendTemplateMessage(
     });
   }
 
-  // Resolve this number's own per-tenant Meta credentials (decrypted from the
+  // Resolve this number own per-tenant Meta credentials (decrypted from the
   // number record — no env fallback). A missing token or a decrypt/config
   // throw leaves both null so we funnel into the failed + refund branch below.
   let phoneNumberId: string | null = null;
@@ -101,7 +116,7 @@ export async function sendTemplateMessage(
     errorMessage =
       "WhatsApp number is not connected. Reconnect it to send messages.";
   } else {
-    // Build template components for header media and body variables
+    // Build template components for header media, body variables, and buttons
     const components: object[] = [];
     const docUrl = documentUrl || mediaUrl;
     const headerType = (template.headerType || "").toLowerCase();
@@ -131,19 +146,49 @@ export async function sendTemplateMessage(
           ],
         });
       }
+    } else if (headerType === "image") {
+      // Default placeholder if template strictly requires an image header
+      components.push({
+        type: "header",
+        parameters: [
+          {
+            type: "image",
+            image: {
+              link: "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=1200",
+            },
+          },
+        ],
+      });
     }
 
     const vars: string[] = variables?.length ? variables : [];
     if (vars.length > 0) {
-      components.push({
-        type: "body",
-        parameters: vars.map((v: string) => ({ type: "text", text: v })),
-      });
+      // Inspect template.body to detect if template was created with NAMED parameters
+      // e.g. {{guest_name}} or numeric {{1}}
+      const namedMatches = Array.from(
+        (template.body || "").matchAll(/\{\{([a-zA-Z0-9_]+)\}\}/g),
+      ).map((m) => m[1]);
+      const isNamed = namedMatches.some((name) => isNaN(Number(name)));
+
+      if (isNamed) {
+        components.push({
+          type: "body",
+          parameters: vars.map((v: string, idx: number) => ({
+            type: "text",
+            parameter_name: namedMatches[idx] || `param_${idx + 1}`,
+            text: v,
+          })),
+        });
+      } else {
+        components.push({
+          type: "body",
+          parameters: vars.map((v: string) => ({ type: "text", text: v })),
+        });
+      }
     }
 
     // Authentication templates carry a copy-code URL button that requires
     // the OTP code as its parameter; without it Meta returns (#131008).
-    // Keyed on variables?.[0] to mirror the early missing-OTP guard above.
     if (template.category === "authentication" && variables?.[0]) {
       components.push({
         type: "button",
@@ -151,6 +196,27 @@ export async function sendTemplateMessage(
         index: "0",
         parameters: [{ type: "text", text: variables[0] }],
       });
+    } else {
+      // URL buttons with dynamic variables (e.g. niqen_invite or custom dynamic buttons)
+      const btnParam = buttonParam || buttonUrlParam;
+      if (btnParam) {
+        components.push({
+          type: "button",
+          sub_type: "url",
+          index: "0",
+          parameters: [{ type: "text", text: btnParam }],
+        });
+      } else if (
+        template.name === "niqen_invite" ||
+        (template.buttons && template.buttons.includes("{{"))
+      ) {
+        components.push({
+          type: "button",
+          sub_type: "url",
+          index: "0",
+          parameters: [{ type: "text", text: "rsvp" }],
+        });
+      }
     }
 
     const metaPayload = {
@@ -186,7 +252,9 @@ export async function sendTemplateMessage(
     if (!metaRes.ok) {
       console.error("[Meta] Send error:", metaData);
       finalStatus = "failed";
-      errorMessage = metaData.error?.message ?? "Failed to send via Meta API";
+      const details = metaData.error?.error_data?.details;
+      const baseMsg = metaData.error?.message ?? "Failed to send via Meta API";
+      errorMessage = details ? `${baseMsg}: ${details}` : baseMsg;
     } else {
       metaMessageId = metaData.messages?.[0]?.id ?? null;
       console.log("[Meta] Message sent, id:", metaMessageId);
