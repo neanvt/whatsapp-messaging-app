@@ -1,6 +1,6 @@
 # WhatsApp Business Messaging Platform — Technical Reference
 
-Last updated: 2026-10-15
+Last updated: 2026-03-22
 
 ## Overview
 
@@ -106,6 +106,20 @@ Last updated: 2026-10-15
   verbatim "Embedded Signup is not configured yet…" message. The manual-
   credentials form (→ `POST /api/numbers/manual`) is gated only on its own
   `showManual` toggle, so a null/failed config never hides the manual path.
+
+### Public pages
+
+- `/privacy-policy` — static server-rendered Privacy Policy page.
+- `/docs` — **Developer Documentation** (server component, no client JS). Public
+  integration guide at route `/docs`: Overview (Model A/B), prerequisites, how to
+  get a WhatsApp access token (temporary / System User / Embedded Signup, with the
+  "No permissions available" and "App can't be updated" pitfalls), connecting a
+  number (manual + Embedded Signup), sending (template + chat free-text, OTP note,
+  1-credit cost), receiving data via the Meta webhook, a full API reference built
+  from the real route handlers (methods, paths, zod/destructured bodies, sample
+  curl + JSON, status codes), an end-to-end walkthrough, an env-name-only table,
+  and a troubleshooting table. Honest about auth: session-cookie guarded, no
+  API-key scheme. Linked from the dashboard sidebar as "Developer Docs".
 
 ## Onboarding paths (connecting a WhatsApp number)
 
@@ -432,6 +446,27 @@ There is no test runner installed; these two checks are the full gate.
   compile step or new dependency.
 
 ## Change log
+
+### 2026-03-22
+
+- **Add developer documentation page at `/docs`.** New server component
+  `src/app/docs/page.tsx` (no client JS, matches the `privacy-policy` page
+  conventions: header bar, in-page table of contents, white rounded cards,
+  `pre/code` samples). Documents the two connection models (A: platform app, B:
+  bring-your-own via Settings → Meta App), prerequisites, how to obtain a
+  WhatsApp access token (temporary / System User / Embedded Signup incl. the "No
+  permissions available" and "App can't be updated" pitfalls), connecting a
+  number (manual + Embedded Signup), sending (template `POST /api/messages/send`
+  with the auth-template OTP note + 1-credit cost, and chat free-text within the
+  24h window), the Meta webhook (GET handshake vs signed POST,
+  X-Hub-Signature-256, status + inbound routing) and how to read data back out,
+  a full API reference grounded in the real route handlers (methods, paths,
+  zod/destructured bodies, curl + JSON samples, 401/400/404/409/422/500 status
+  codes as the code returns them), an end-to-end walkthrough, an env-name-only
+  table, and a troubleshooting table. Honestly states that endpoints are
+  session-cookie guarded (`getServerSession`) with no programmatic API-key
+  scheme. Added a "Developer Docs" link to the dashboard sidebar
+  (`src/components/dashboard/sidebar.tsx`). **Verification:** `npm run build`.
 
 ### 2026-10-15
 

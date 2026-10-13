@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   Settings,
   MessagesSquare,
+  BookOpen,
 } from "lucide-react";
 
 const navigation = [
@@ -51,7 +52,14 @@ export function Sidebar() {
           );
         })}
       </nav>
-      <div className="p-4 border-t border-gray-800">
+      <div className="p-4 border-t border-gray-800 space-y-1">
+        <Link
+          href="/docs"
+          className="flex items-center px-4 py-3 text-sm font-medium text-gray-300 rounded-lg hover:bg-gray-800 hover:text-white transition-colors"
+        >
+          <BookOpen className="w-5 h-5 mr-3" />
+          Developer Docs
+        </Link>
         <Link
           href="/dashboard/settings"
           className="flex items-center px-4 py-3 text-sm font-medium text-gray-300 rounded-lg hover:bg-gray-800 hover:text-white transition-colors"
