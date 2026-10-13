@@ -1,3 +1,5 @@
+import { createClient } from "@libsql/client";
+import crypto from "crypto";
 // Shared send core, extracted byte-for-byte from the former POST /api/messages/send
 // route body. Both the session route and the public /api/v1 route call this so the two
 // paths can never drift. Returns a plain result object — never a NextResponse — and never
@@ -126,54 +128,36 @@ export async function sendTemplateMessage(
   } else {
     // Build template components for header media, body variables, and buttons
     const components: object[] = [];
-    const docUrl = documentUrl || mediaUrl;
+    let docUrl = documentUrl || mediaUrl;
     const headerType = (template.headerType || "").toLowerCase();
     const resolvedFilename = fileName || filename || "receipt.pdf";
     const rawBase64 = documentBase64 || pdfBase64 || mediaBase64;
 
-    let headerMediaId = mediaId || null;
-
-    if (!headerMediaId && rawBase64 && phoneNumberId && accessToken) {
+    if (!docUrl && rawBase64) {
       try {
-        const cleanB64 = rawBase64.replace(/^data:[^;]+;base64,/, "");
-        const buf = Buffer.from(cleanB64, "base64");
+        const mid = "med_" + crypto.randomUUID().replace(/-/g, "");
         const mimeType = headerType === "image" ? "image/jpeg" : headerType === "video" ? "video/mp4" : "application/pdf";
-        const formData = new FormData();
-        formData.append("messaging_product", "whatsapp");
-        formData.append("type", mimeType);
-        formData.append("file", new Blob([buf], { type: mimeType }), resolvedFilename);
-
-        const upRes = await fetch(
-          `https://graph.facebook.com/v19.0/${phoneNumberId}/media`,
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${accessToken}` },
-            body: formData,
-          },
-        );
-        const upData = await upRes.json();
-        if (upData.id) {
-          headerMediaId = upData.id;
-          console.log("[Meta] Uploaded media to Meta, id:", headerMediaId);
-        } else {
-          console.warn("[Meta] Media upload returned without id:", upData);
-        }
-      } catch (upErr) {
-        console.error("[Meta] Media upload exception:", upErr);
+        const client = createClient({
+          url: process.env.TURSO_DATABASE_URL!,
+          authToken: process.env.TURSO_AUTH_TOKEN,
+        });
+        await client.execute({
+          sql: "INSERT INTO MediaStore (id, mimeType, filename, dataBase64, createdAt) VALUES (?, ?, ?, ?, ?)",
+          args: [mid, mimeType, resolvedFilename, rawBase64, new Date().toISOString()],
+        });
+        const appBase = process.env.NEXTAUTH_URL || "https://wa-neanv.vercel.app";
+        docUrl = `${appBase.replace(/\/+$/, "")}/api/v1/media/${mid}`;
+        console.log("[Send] Stored base64 in MediaStore, docUrl:", docUrl);
+      } catch (storeErr) {
+        console.error("[Send] MediaStore insert error:", storeErr);
       }
     }
 
-    if (headerMediaId) {
-      const paramType = headerType === "image" ? "image" : headerType === "video" ? "video" : "document";
-      const mediaObj = { id: headerMediaId };
-      if (paramType === "document") {
-        mediaObj.filename = resolvedFilename;
-      }
-      components.push({
-        type: "header",
-        parameters: [{ type: paramType, [paramType]: mediaObj }],
-      });
-    } else if (docUrl) {
+    if (!docUrl && headerType === "document") {
+      docUrl = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf";
+    }
+
+    if (docUrl) {
       if (headerType === "image") {
         components.push({
           type: "header",
@@ -197,37 +181,6 @@ export async function sendTemplateMessage(
             },
           ],
         });
-      }
-    } else if (headerType === "document") {
-      try {
-        const dummyPdf = Buffer.from("%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R/Resources<<>>>>endobj\nxref\n0 4\n0000000000 65535 f\n0000000009 00000 n\n0000000052 00000 n\n00000000101 00000 n\ntrailer<</Size 4/Root 1 0 R>>\nstartxref\n178\n%%EOF\n");
-        const formData = new FormData();
-        formData.append("messaging_product", "whatsapp");
-        formData.append("type", "application/pdf");
-        formData.append("file", new Blob([dummyPdf], { type: "application/pdf" }), resolvedFilename);
-
-        const upRes = await fetch(
-          `https://graph.facebook.com/v19.0/${phoneNumberId}/media`,
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${accessToken}` },
-            body: formData,
-          },
-        );
-        const upData = await upRes.json();
-        if (upData.id) {
-          components.push({
-            type: "header",
-            parameters: [
-              {
-                type: "document",
-                document: { id: upData.id, filename: resolvedFilename },
-              },
-            ],
-          });
-        }
-      } catch (fallbackErr) {
-        console.warn("[Meta] Fallback document upload failed:", fallbackErr);
       }
     } else if (headerType === "image") {
       components.push({
