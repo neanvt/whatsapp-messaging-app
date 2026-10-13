@@ -582,6 +582,19 @@ There is no test runner installed; these two checks are the full gate.
 
 ## Change log
 
+### 2026-10-19 (d) — Public template API returns full content
+- `GET /api/v1/templates` now returns full template content for the key owner:
+  `body`, `headerType`, `headerContent`, `footerContent`, `buttons` (parsed from
+  the stored JSON string), plus a derived `variableCount` (distinct `{{n}}`
+  placeholders) so a third-party integration can preview a template and know how
+  many `variables` to send.
+- Added `GET /api/v1/templates/[id]` — single-template detail, same fields +
+  `variableCount`, scoped to the key owner with an identical 404 (no existence
+  oracle). Shared formatting helpers live in `src/lib/template-format.ts`
+  (`countVariables`, `parseJsonColumn`) since Next.js route files may only export
+  HTTP handlers. `/docs` updated with the richer response shapes and the new
+  endpoint.
+
 ### 2026-10-19 (c) — Sidebar toggle on desktop
 - The header menu button is now visible at ALL breakpoints and is
   breakpoint-aware: below lg it toggles the off-canvas drawer (as before); at

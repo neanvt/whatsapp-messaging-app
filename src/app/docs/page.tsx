@@ -535,8 +535,9 @@ export default function DocsPage() {
               <Method>GET</Method>/api/v1/templates
             </h3>
             <p className="text-gray-700">
-              <strong>Auth:</strong> API key (Bearer). Lists your templates so the
-              integration can see which are usable.{" "}
+              <strong>Auth:</strong> API key (Bearer). Lists your templates with
+              their full content so the integration can render a preview and know
+              how many variables to collect.{" "}
               <strong>Query (optional):</strong>{" "}
               <code className="font-mono text-sm">status</code> (one of{" "}
               <code className="font-mono text-sm">draft</code>,{" "}
@@ -548,14 +549,66 @@ export default function DocsPage() {
             <CodeBlock>{`curl "https://your-app.com/api/v1/templates?status=approved" \\
   -H "Authorization: Bearer wa_live_xxxxxxxx"`}</CodeBlock>
             <p className="text-gray-700">
-              <strong>200:</strong>
+              <strong>200:</strong> each template includes its body (with{" "}
+              <code className="font-mono text-sm">{"{{n}}"}</code> placeholders),
+              header/footer/buttons, and a{" "}
+              <code className="font-mono text-sm">variableCount</code> telling you
+              how many values to send in{" "}
+              <code className="font-mono text-sm">variables</code>.
             </p>
             <CodeBlock>{`[
-  { "id": "tpl_456", "name": "order_update", "category": "utility", "language": "en", "status": "approved" }
+  {
+    "id": "tpl_456",
+    "name": "order_update",
+    "category": "utility",
+    "language": "en",
+    "status": "approved",
+    "body": "Hi {{1}}, your order {{2}} has shipped.",
+    "headerType": "text",
+    "headerContent": "Order Update",
+    "footerContent": "Reply STOP to opt out",
+    "buttons": [{ "type": "URL", "text": "Track", "url": "https://..." }],
+    "variableCount": 2
+  }
 ]`}</CodeBlock>
             <p className="text-gray-700 text-sm">
               <strong>Errors:</strong> 401 missing/invalid key; 400 an unknown{" "}
               <code className="font-mono">status</code> value.
+            </p>
+          </div>
+
+          {/* GET /api/v1/templates/[id] */}
+          <div className="space-y-2 border-t pt-5">
+            <h3 className="text-lg font-semibold text-gray-900">
+              <Method>GET</Method>/api/v1/templates/[id]
+            </h3>
+            <p className="text-gray-700">
+              <strong>Auth:</strong> API key (Bearer). Returns one template&apos;s
+              full content + <code className="font-mono text-sm">variableCount</code>,
+              scoped to the key owner. A template that does not exist or belongs to
+              another account returns an identical 404.
+            </p>
+            <CodeBlock>{`curl https://your-app.com/api/v1/templates/TEMPLATE_ID \\
+  -H "Authorization: Bearer wa_live_xxxxxxxx"`}</CodeBlock>
+            <p className="text-gray-700">
+              <strong>200:</strong>
+            </p>
+            <CodeBlock>{`{
+  "id": "tpl_456",
+  "name": "order_update",
+  "category": "utility",
+  "language": "en",
+  "status": "approved",
+  "body": "Hi {{1}}, your order {{2}} has shipped.",
+  "headerType": "text",
+  "headerContent": "Order Update",
+  "footerContent": "Reply STOP to opt out",
+  "buttons": [{ "type": "URL", "text": "Track", "url": "https://..." }],
+  "variableCount": 2
+}`}</CodeBlock>
+            <p className="text-gray-700 text-sm">
+              <strong>Errors:</strong> 401 missing/invalid key; 404 not found or
+              not yours.
             </p>
           </div>
 
