@@ -13,6 +13,10 @@ export interface SendTemplateInput {
   template: Template; // already resolved + approved + owned by userId by the caller
   recipient: string;
   variables?: string[];
+  mediaUrl?: string;
+  documentUrl?: string;
+  fileName?: string;
+  filename?: string;
   isSuperAdmin: boolean; // caller supplies; computed ONCE by the caller
 }
 
@@ -26,7 +30,7 @@ export type SendTemplateResult =
 export async function sendTemplateMessage(
   input: SendTemplateInput,
 ): Promise<SendTemplateResult> {
-  const { userId, number, template, recipient, variables, isSuperAdmin } = input;
+  const { userId, number, template, recipient, variables, mediaUrl, documentUrl, fileName, filename, isSuperAdmin } = input;
 
   // Authentication templates require the OTP code as the first variable.
   // Guard here — before any message record or credit deduction — so a
@@ -97,8 +101,38 @@ export async function sendTemplateMessage(
     errorMessage =
       "WhatsApp number is not connected. Reconnect it to send messages.";
   } else {
-    // Build template components for variables (if any)
+    // Build template components for header media and body variables
     const components: object[] = [];
+    const docUrl = documentUrl || mediaUrl;
+    const headerType = (template.headerType || "").toLowerCase();
+
+    if (docUrl) {
+      if (headerType === "image") {
+        components.push({
+          type: "header",
+          parameters: [{ type: "image", image: { link: docUrl } }],
+        });
+      } else if (headerType === "video") {
+        components.push({
+          type: "header",
+          parameters: [{ type: "video", video: { link: docUrl } }],
+        });
+      } else {
+        components.push({
+          type: "header",
+          parameters: [
+            {
+              type: "document",
+              document: {
+                link: docUrl,
+                filename: fileName || filename || "receipt.pdf",
+              },
+            },
+          ],
+        });
+      }
+    }
+
     const vars: string[] = variables?.length ? variables : [];
     if (vars.length > 0) {
       components.push({

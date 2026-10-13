@@ -11,6 +11,10 @@ const Body = z
     templateName: z.string().min(1).optional(),
     templateId: z.string().min(1).optional(),
     variables: z.array(z.string()).optional(),
+    mediaUrl: z.string().optional(),
+    documentUrl: z.string().optional(),
+    fileName: z.string().optional(),
+    filename: z.string().optional(),
   })
   .refine((b) => !!b.templateName !== !!b.templateId, {
     message: "Provide exactly one of templateName or templateId",
@@ -30,7 +34,7 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const { recipient, templateName, templateId, variables } = parsed.data;
+    const { recipient, templateName, templateId, variables, mediaUrl, documentUrl, fileName, filename } = parsed.data;
 
     // Resolve the template by owner + name/id. Split not-found (404) from
     // exists-but-not-approved (400): find owner-scoped first, then check status.
@@ -65,6 +69,10 @@ export async function POST(request: Request) {
       template: owned,
       recipient,
       variables,
+      mediaUrl,
+      documentUrl,
+      fileName,
+      filename,
       isSuperAdmin,
     });
 
