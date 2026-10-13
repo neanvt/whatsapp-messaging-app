@@ -1,0 +1,24 @@
+{
+  "verdict": "APPROVED",
+  "findings": [
+    {
+      "severity": "NIT",
+      "where": "design.md §3 / §6.3; docs target",
+      "problem": "Design labels docs edits as \"§6\" / numbered sections, but src/app/docs/page.tsx is JSX with comment markers (no numbered sections).",
+      "fix": "Target the {/* POST /api/v1/messages */} block (~line 459) and {/* GET /api/v1/templates */} block (~line 532) rather than a literal \"§6\"."
+    },
+    {
+      "severity": "NIT",
+      "where": "design.md §5.4 (buttonUrlIsDynamic)",
+      "problem": "buttons is a JSON string whose button type is stored upper-case (e.g. \"URL\"); dynamic detection must tolerate array/garbage shapes and case.",
+      "fix": "After parseJsonColumn, guard for non-array/garbage (return false) and match type case-insensitively before testing url.includes(\"{{\")."
+    },
+    {
+      "severity": "NIT",
+      "where": "design.md §5.1 gate check (c) vs §5.4 emission",
+      "problem": "btnParam and buttonIsDynamic are computed in both the gate and the button-emission site, risking divergence if one is later edited.",
+      "fix": "Compute buttonIsDynamic and btnParam once and reuse at both sites."
+    }
+  ],
+  "reviewDoc": "/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/.agents/tasks/named-template-send-fix/design-review.md"
+}

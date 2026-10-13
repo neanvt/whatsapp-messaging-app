@@ -11,6 +11,7 @@ const Body = z
     templateName: z.string().min(1).optional(),
     templateId: z.string().min(1).optional(),
     variables: z.array(z.string()).optional(),
+    templateParams: z.record(z.string(), z.string()).optional(),
     mediaUrl: z.string().optional(),
     documentUrl: z.string().optional(),
     documentBase64: z.string().optional(),
@@ -24,7 +25,18 @@ const Body = z
   })
   .refine((b) => !!b.templateName !== !!b.templateId, {
     message: "Provide exactly one of templateName or templateId",
-  });
+  })
+  .refine(
+    (b) =>
+      !(
+        b.variables?.length &&
+        b.templateParams &&
+        Object.keys(b.templateParams).length > 0
+      ),
+    {
+      message: "Provide either 'variables' or 'templateParams', not both.",
+    },
+  );
 
 // POST - Public template send. API-key auth only; the send always uses the key's
 // bound number (ctx.number) — a client number/credential is never accepted.
@@ -45,6 +57,7 @@ export async function POST(request: Request) {
       templateName,
       templateId,
       variables,
+      templateParams,
       mediaUrl,
       documentUrl,
       fileName,
@@ -90,6 +103,7 @@ export async function POST(request: Request) {
       template: owned,
       recipient,
       variables,
+      namedParams: templateParams,
       mediaUrl,
       documentUrl,
       fileName,

@@ -472,28 +472,82 @@ export default function DocsPage() {
               phone, non-digits are stripped), exactly one of{" "}
               <code className="font-mono text-sm">templateName</code> or{" "}
               <code className="font-mono text-sm">templateId</code> (string, req —
-              an approved template you own),{" "}
-              <code className="font-mono text-sm">variables</code> (string[],
-              optional — for authentication templates,{" "}
-              <code className="font-mono text-sm">variables[0]</code> must be the
-              OTP code). There is no number field — the bound number is always
-              used.
+              an approved template you own), and the template&apos;s variables in{" "}
+              <strong>one</strong> of two forms (not both). There is no number
+              field — the bound number is always used.
             </p>
-            <CodeBlock>{`curl -X POST https://your-app.com/api/v1/messages \\
+            <p className="text-gray-700">
+              <strong>Variables — positional (back-compat):</strong>{" "}
+              <code className="font-mono text-sm">variables</code> (string[]) — an
+              ordered array of values. For a <em>numbered</em> template (
+              <code className="font-mono text-sm">{"{{1}}"}</code>,{" "}
+              <code className="font-mono text-sm">{"{{2}}"}</code>…) they map to{" "}
+              <code className="font-mono text-sm">{"{{1}}..{{n}}"}</code> in order.
+              For a <em>named</em> template they map, in order, to the
+              template&apos;s declared parameter names (see the deterministic
+              order below). For an authentication template,{" "}
+              <code className="font-mono text-sm">variables[0]</code> must be the
+              OTP code.
+            </p>
+            <p className="text-gray-700">
+              <strong>Variables — named map (new):</strong>{" "}
+              <code className="font-mono text-sm">templateParams</code> (object)
+              — a map of{" "}
+              <code className="font-mono text-sm">
+                {'{ "<name>": "<value>" }'}
+              </code>{" "}
+              whose keys are the template&apos;s declared named parameters. Key
+              order in the JSON does not matter; values are emitted in the
+              template&apos;s declared order. Use this for named templates (e.g.{" "}
+              <code className="font-mono text-sm">niqen_invite</code>).
+            </p>
+            <p className="text-gray-700">
+              <strong>Deterministic order &amp; disambiguation:</strong> a
+              named template&apos;s declared order is the{" "}
+              <strong>
+                first-occurrence, distinct, left-to-right order of{" "}
+                <code className="font-mono text-sm">{"{{name}}"}</code>{" "}
+                placeholders in the body
+              </strong>{" "}
+              (a name that repeats consumes exactly one value). Read{" "}
+              <code className="font-mono text-sm">namedParams</code> from{" "}
+              <code className="font-mono text-sm">GET /api/v1/templates</code> to
+              get this list. A request is treated as the named-map form iff{" "}
+              <code className="font-mono text-sm">templateParams</code> is present
+              and non-empty; otherwise it uses{" "}
+              <code className="font-mono text-sm">variables</code>. Sending both
+              is a 400. Names/counts are validated against the template{" "}
+              <strong>before any credit is charged</strong>: a missing/extra name
+              or wrong count returns a 400 (echoing expected vs provided) with no
+              credit deducted and no message row persisted.
+            </p>
+            <CodeBlock>{`# Positional (numbered template)
+curl -X POST https://your-app.com/api/v1/messages \\
   -H "Authorization: Bearer wa_live_xxxxxxxx" \\
   -H "Content-Type: application/json" \\
-  -d '{"recipient":"15551234567","templateName":"order_update","variables":["1234"]}'`}</CodeBlock>
+  -d '{"recipient":"15551234567","templateName":"order_update","variables":["1234"]}'
+
+# Named map (named template, e.g. niqen_invite)
+# This template also has an IMAGE header (send mediaUrl) and a dynamic
+# URL button (send buttonParam) in addition to its named body params.
+curl -X POST https://your-app.com/api/v1/messages \\
+  -H "Authorization: Bearer wa_live_xxxxxxxx" \\
+  -H "Content-Type: application/json" \\
+  -d '{"recipient":"15551234567","templateName":"niqen_invite","mediaUrl":"https://example.com/invite.jpg","buttonParam":"abc123","templateParams":{"event":"E","guest_name":"G","event_name":"N","event_date":"D","venue_name":"V","allowed_guests":"2","pass_url":"https://example.com/pass","card_url":"https://example.com/card"}}'`}</CodeBlock>
             <p className="text-gray-700">
               <strong>200:</strong>
             </p>
             <CodeBlock>{`{ "id": "msg_789", "status": "sent", "metaMessageId": "wamid.XXXX" }`}</CodeBlock>
             <p className="text-gray-700 text-sm">
               <strong>Errors:</strong> 401 missing/invalid key; 400 invalid body
-              (missing recipient, not exactly one of templateName/templateId, or a
-              missing OTP variable) or the template exists but is not approved; 402
-              insufficient credits (before contacting Meta); 404 the template is
-              not found for your account; 500 the bound number is not connected or
-              Meta rejected the send (the credit is refunded).
+              (missing recipient, not exactly one of templateName/templateId, both
+              variables and templateParams supplied, a named-parameter name/count
+              mismatch, a media header with no media source, a dynamic URL button
+              with no buttonParam, or a missing OTP variable) or the template
+              exists but is not approved; 402 insufficient credits (before
+              contacting Meta); 404 the template is not found for your account; 500
+              the bound number is not connected or Meta rejected the send (the
+              credit is refunded).
             </p>
           </div>
 
@@ -527,6 +581,21 @@ export default function DocsPage() {
               message id (an id that does not exist, or one owned by another
               user/number, returns the same 404 — no existence oracle).
             </p>
+            <p className="text-gray-700 text-sm">
+              <strong>Note on delivery status:</strong> a{" "}
+              <code className="font-mono text-sm">status</code> of{" "}
+              <code className="font-mono text-sm">sent</code> with a{" "}
+              <code className="font-mono text-sm">metaMessageId</code> but a null{" "}
+              <code className="font-mono text-sm">deliveredAt</code> (Insights
+              showing &quot;Message delivered: 0&quot;) is a{" "}
+              <strong>separate</strong> concern from the send call itself. The
+              send was accepted by Meta; the delivery/read callbacks arrive on the
+              status webhook. If they never arrive, the usual causes are the
+              app-level webhook secret (<code className="font-mono text-sm">META_APP_SECRET</code>) not being set on the deploy
+              so signed status POSTs fail verification, or the WABA not being
+              subscribed to the <code className="font-mono text-sm">messages</code>{" "}
+              webhook field. This is unrelated to template-variable formatting.
+            </p>
           </div>
 
           {/* GET /api/v1/templates */}
@@ -550,11 +619,28 @@ export default function DocsPage() {
   -H "Authorization: Bearer wa_live_xxxxxxxx"`}</CodeBlock>
             <p className="text-gray-700">
               <strong>200:</strong> each template includes its body (with{" "}
-              <code className="font-mono text-sm">{"{{n}}"}</code> placeholders),
-              header/footer/buttons, and a{" "}
-              <code className="font-mono text-sm">variableCount</code> telling you
-              how many values to send in{" "}
-              <code className="font-mono text-sm">variables</code>.
+              <code className="font-mono text-sm">{"{{n}}"}</code> or{" "}
+              <code className="font-mono text-sm">{"{{name}}"}</code>{" "}
+              placeholders), header/footer/buttons, a{" "}
+              <code className="font-mono text-sm">variableCount</code>, and a{" "}
+              <code className="font-mono text-sm">namedParams</code> array.
+            </p>
+            <p className="text-gray-700 text-sm">
+              <code className="font-mono text-sm">variableCount</code> is the
+              number of <strong>numbered</strong> (
+              <code className="font-mono text-sm">{"{{1}}"}</code>,{" "}
+              <code className="font-mono text-sm">{"{{2}}"}</code>…) placeholders;
+              for a <strong>named-parameter</strong> template it is{" "}
+              <code className="font-mono text-sm">0</code>.{" "}
+              <code className="font-mono text-sm">namedParams</code> lists the
+              template&apos;s declared parameter names in the exact order to send
+              (first-occurrence, distinct, left-to-right over the body); it is{" "}
+              <code className="font-mono text-sm">[]</code> for numbered or
+              no-placeholder templates. Send those values either as a{" "}
+              <code className="font-mono text-sm">templateParams</code> object
+              keyed by those names, or as a positional{" "}
+              <code className="font-mono text-sm">variables</code> array in that
+              same order.
             </p>
             <CodeBlock>{`[
   {
@@ -568,7 +654,22 @@ export default function DocsPage() {
     "headerContent": "Order Update",
     "footerContent": "Reply STOP to opt out",
     "buttons": [{ "type": "URL", "text": "Track", "url": "https://..." }],
-    "variableCount": 2
+    "variableCount": 2,
+    "namedParams": []
+  },
+  {
+    "id": "tpl_789",
+    "name": "niqen_invite",
+    "category": "marketing",
+    "language": "en",
+    "status": "approved",
+    "body": "VIP Invitation to {{event}} ... Dear {{guest_name}} ...",
+    "headerType": "image",
+    "headerContent": null,
+    "footerContent": null,
+    "buttons": [{ "type": "URL", "text": "Confirm Your Visit", "url": "https://.../{{1}}" }],
+    "variableCount": 0,
+    "namedParams": ["event", "guest_name", "event_name", "event_date", "venue_name", "allowed_guests", "pass_url", "card_url"]
   }
 ]`}</CodeBlock>
             <p className="text-gray-700 text-sm">

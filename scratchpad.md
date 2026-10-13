@@ -233,9 +233,9 @@ the platform one without a rebuild.
 | GET/POST | `/api/admin/users` + `/[id]` | Admin user management |
 | GET/POST | `/api/admin/packages` + `/[id]` | Admin package management |
 | GET/POST | `/api/webhooks/whatsapp` | Meta webhook — GET handshake; POST verifies `X-Hub-Signature-256` then routes inbound/status (see Webhook flow) |
-| POST | `/api/v1/messages` | **Public M2M** — send a template via the key's bound number. Auth: `Authorization: Bearer wa_live_...` only (no session, no client credential). Body `{ recipient, templateName \| templateId, variables? }` (exactly one template key). 200 `{ id, status, metaMessageId }` / 400 / 401 / 402 (credits) / 404 (template) / 500 |
+| POST | `/api/v1/messages` | **Public M2M** — send a template via the key's bound number. Auth: `Authorization: Bearer wa_live_...` only (no session, no client credential). Body `{ recipient, templateName \| templateId, variables? \| templateParams? }` (exactly one template key; positional array OR named map, not both). 200 `{ id, status, metaMessageId }` / 400 (incl. pre-charge name/count/header/button mismatch) / 401 / 402 (credits) / 404 (template) / 500 |
 | GET | `/api/v1/messages/[id]` | **Public M2M** — message status. API-key auth; scoped to owner + bound number. 200 projection (`id,status,recipientPhone,metaMessageId,errorMessage,sentAt,deliveredAt,readAt,createdAt`) / 401 / 404 (identical for unknown vs other-owner/number — no oracle) |
-| GET | `/api/v1/templates` | **Public M2M** — owner's templates (`id,name,category,language,status`). API-key auth; optional `?status` validated against draft/pending/submitted/approved/rejected (400 on unknown). 200 list / 401 / 400 |
+| GET | `/api/v1/templates` | **Public M2M** — owner's templates incl. `variableCount` (numbered-only count; `0` for named templates) and `namedParams` (ordered, de-duplicated declared named params; `[]` for numbered/none). API-key auth; optional `?status` validated against draft/pending/submitted/approved/rejected (400 on unknown). 200 list / 401 / 400 |
 | GET | `/api/api-keys` | **Key management (session)** — list the caller's API keys. `select` allow-list (`id,name,keyPrefix,lastUsedAt,revokedAt,createdAt` + bound number `id/phoneNumber/displayPhoneNumber`), **never** `keyHash`. 200 / 401 / 500 |
 | POST | `/api/api-keys` | **Key management (session)** — create a key bound to a verified owned number. zod `{ name, numberId }`; unverified/unowned number → 400. **One-time reveal:** 201 `{ id, name, keyPrefix, whatsappNumberId, lastUsedAt, revokedAt, createdAt, key }` — plaintext `key` returned ONLY here, never stored, never re-returned; `keyHash` never in any response. 400 / 401 / 500 |
 | DELETE | `/api/api-keys/[id]` | **Key management (session)** — revoke (`revokedAt`). Scoped to `session.user.id`; another user's key → 404 (never revocable). Idempotent (re-revoke → 200 `{ id, revoked: true }`). 200 / 401 / 404 / 500 |
@@ -283,9 +283,36 @@ the public `POST /api/v1/messages` route share one code path and can never drift
   check, deduct, and refund (symmetric credit math). The helper never reads a
   session, never re-derives superadmin, and never builds a `NextResponse`.
 - **Result:** `{ ok:true, message:{ id, status:"sent", metaMessageId } }` or
-  `{ ok:false, code, error }` where `code` ∈ `{400 (missing OTP), 402
-  (insufficient credits), 500 (not-connected / Meta non-2xx, refund already
-  applied)}`.
+  `{ ok:false, code, error }` where `code` ∈ `{400 (missing OTP, or a pre-charge
+  validation failure — see below), 402 (insufficient credits), 500 (not-connected
+  / Meta non-2xx, refund already applied)}`.
+- **Named vs numbered body handling (template-params):** body shape is derived
+  from `template.body` by the pure module `src/lib/template-params.ts`
+  (`parseTemplateBody` → `{kind:"named",names}` | `{kind:"numbered",count}` |
+  `{kind:"none"}`, scanned once with a whitespace-tolerant regex and
+  de-duplicated to first-occurrence declared order). The helper accepts either a
+  positional `variables: string[]` OR a named `namedParams: Record<string,string>`
+  map and calls `resolveBodyParams(model, { variables, namedParams, name })` to
+  resolve ONE canonical shape. **Named** templates emit
+  `{ type:"text", parameter_name, text }` in declared order; **numbered** emit
+  positional `{ type:"text", text }` (no `parameter_name`, byte-identical to
+  before); **none** emits no body component. The old index-based
+  `parameter_name: namedMatches[idx]` mapping, the `template.name === "niqen_invite"`
+  / literal `"rsvp"` button, and the dummy Unsplash header image are **removed**.
+- **Pre-charge validation gate:** a PURE (no DB/network) gate runs after the
+  auth-OTP guard and BEFORE the credit check / message row. It 400s on: body
+  name/count mismatch (missing/extra named key, wrong positional count, both forms
+  supplied, named map for a numbered template); a media header
+  (`headerType` ∈ image/video/document) with no media source
+  (`mediaUrl`/`documentUrl`/base64 — `mediaId` is dead input and not counted); and
+  a dynamic URL button (`buttonUrlIsDynamic(template.buttons)` true) with no
+  `buttonParam`/`buttonUrlParam`. A 400 here charges no credit and persists no row.
+- **Header/button correctness rules:** a header component is emitted ONLY for a
+  real media header with a resolved URL (no dummy fallback); a text/none header
+  emits nothing. A URL button is emitted ONLY when it is the auth copy-code button
+  (`category==="authentication"` + `variables[0]`, preserved for `#131008`) or a
+  dynamic URL button with a caller-supplied `buttonParam`. Static buttons emit
+  nothing.
 - **402 vs 400:** the helper returns **402** for insufficient credits. The
   **session wrapper remaps 402→400** to preserve its legacy dashboard code; the
   **public route surfaces 402 verbatim**. This is the one deliberate asymmetry.
@@ -314,12 +341,19 @@ that bound number (any client-supplied number/credential field is ignored).
   → `unauthorized()` 401 `{ error: "Invalid or missing API key" }` with **no
   oracle**. The token and hash are never logged.
 - **`POST /api/v1/messages`:** zod body `{ recipient, templateName?, templateId?,
-  variables? }` with an XOR refine (both or neither template key → 400); resolves
-  the template owner-scoped (not-found → 404, exists-but-not-approved → 400);
-  computes `isSuperAdmin` once via `isSuperAdminUser(owner)` (email-driven, so a
-  superadmin whose DB `role` is `"admin"` is not charged); calls the shared
-  `sendTemplateMessage` with `ctx.number`; maps `ok:true` → 200 `{ id, status,
-  metaMessageId }` and `ok:false` → the helper code verbatim (402/400/500).
+  variables?, templateParams? }` with an XOR refine (both or neither template key
+  → 400) plus a refine rejecting both `variables` and `templateParams` together
+  (→ 400). **Named-variable contract:** send a named template's values either as a
+  positional `variables: string[]` (back-compat) OR a named `templateParams`
+  object keyed by the template's declared names; a request is named-map iff
+  `templateParams` is present and non-empty, else positional. Names/counts are
+  validated in the shared helper's pre-charge gate (400 before any credit). The
+  deterministic positional→named order is first-occurrence, distinct, left-to-right
+  over `template.body`. Resolves the template owner-scoped (not-found → 404,
+  exists-but-not-approved → 400); computes `isSuperAdmin` once via
+  `isSuperAdminUser(owner)`; calls the shared `sendTemplateMessage` with
+  `ctx.number` and `namedParams: templateParams`; maps `ok:true` → 200 `{ id,
+  status, metaMessageId }` and `ok:false` → the helper code verbatim (402/400/500).
 - **`GET /api/v1/messages/[id]`:** `findFirst` scoped to `{ id, userId,
   whatsappNumberId }` — a non-matching id (unknown OR other-owner/other-number)
   returns the identical 404; the path id is never logged. Returns a
@@ -581,6 +615,64 @@ There is no test runner installed; these two checks are the full gate.
   compile step or new dependency.
 
 ## Change log
+
+### 2026-10-13 — Named-parameter template send fix (implemented)
+- **New `src/lib/template-params.ts`** — pure, DB/network-free module:
+  `parseTemplateBody` (named/numbered/none, single whitespace-tolerant scan,
+  de-duplicated first-occurrence declared order), `namedParams`,
+  `resolveBodyParams` (resolves positional `variables` or a named map to one
+  canonical body shape with Meta-style, secret-free validation errors), and
+  `buttonUrlIsDynamic` (true iff a URL button's `url` contains `{{`). Unit-tested
+  by `scripts/test-template-params.mjs` (21 assertions, node built-ins only).
+- **Rewrote `src/lib/send-template.ts` component construction** to be
+  structure-driven: removed the index-based `parameter_name: namedMatches[idx]`
+  mapping, the `template.name === "niqen_invite"` / literal `"rsvp"` button
+  hardcode, and the dummy Unsplash image / dummy-PDF header fallbacks. Added a
+  pure pre-charge validation gate (after the auth-OTP guard, before the credit
+  check) that 400s on body name/count mismatch, a media header with no media
+  source, or a dynamic URL button with no `buttonParam` — all before any credit
+  or row. BODY emits `parameter_name`+text for named, positional text for
+  numbered (byte-identical to before), nothing for none. HEADER emits only for a
+  real media header with a resolved URL (media resolution failure routes to the
+  existing failed+refund path). Preserved exactly: auth copy-code `#131008`
+  button, early missing-OTP 400, credit deduct/refund, superadmin exemption,
+  numbered positional payloads, and `error.error_data.details` surfacing.
+- **`src/lib/template-format.ts`** — `countVariables` now delegates to
+  `parseTemplateBody` (single source of truth for the numbered count); re-exports
+  `namedParams`.
+- **`POST /api/v1/messages`** — accepts `templateParams: Record<string,string>`
+  (named map) in addition to positional `variables`; a `.refine` rejects both
+  together; passes `namedParams: templateParams` to the shared helper. Session
+  route `/api/messages/send` unchanged (still positional only; same helper;
+  402→400 remap intact).
+- **`GET /api/v1/templates`** — additive `namedParams: string[]` field (ordered
+  declared named params; `[]` for numbered/none). `variableCount` unchanged.
+- **`/docs`** — documented the named-variable contract (named map vs positional,
+  deterministic order, pre-charge 400, `variableCount` vs `namedParams`), added a
+  `niqen_invite` named-map curl, and a separate note that null `deliveredAt`
+  ("Message delivered: 0") is a distinct webhook/`META_APP_SECRET` concern, not
+  the send fix.
+- **Ground truth (evidence.md):** a live Graph `v19.0` call confirmed the real
+  `niqen_invite` structure — IMAGE header, **8** named body params
+  (`event, guest_name, event_name, event_date, venue_name, allowed_guests,
+  pass_url, card_url`), and a dynamic `{{1}}` URL button. The fix reads the live
+  body so it adapts automatically; docs examples updated to the real 8-name order.
+  `npm run build` exit 0; `npm run lint` clean; unit tests 21/21.
+
+### 2025-06-12 — Design authored: named-parameter template send fix
+- Wrote `.agents/tasks/named-template-send-fix/design.md` (no code change yet).
+- Root cause pinned in `src/lib/send-template.ts`: named body params built by
+  index against a NON-de-duplicated body scan (`parameter_name: namedMatches[idx]`),
+  a hardcoded `niqen_invite`/`"rsvp"` URL button, and a dummy Unsplash fallback
+  image for static image headers → Meta `#132000`/`#100`.
+- Design: new pure `src/lib/template-params.ts` (`parseTemplateBody`,
+  `resolveBodyParams`, `buttonUrlIsDynamic`); structure-driven header/body/button
+  construction; pre-charge 400 validation before credit deduction; public API
+  gains a `templateParams` named-map form (disambiguated from positional
+  `variables`); numbered templates (`otp_1`, `migration_alert_v2`) stay
+  byte-identical; auth OTP button/guard preserved; single shared send path kept.
+- Separate out-of-scope note recorded: null `deliveredAt` is a webhook/
+  `META_APP_SECRET`/WABA-subscription issue, not the send bug.
 
 ### 2026-10-19 (d) — Public template API returns full content
 - `GET /api/v1/templates` now returns full template content for the key owner:

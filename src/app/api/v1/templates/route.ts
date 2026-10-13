@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import { authenticateApiKey, unauthorized } from "@/lib/api-auth";
-import { countVariables, parseJsonColumn } from "@/lib/template-format";
+import {
+  countVariables,
+  namedParams,
+  parseJsonColumn,
+} from "@/lib/template-format";
 
 const KNOWN = ["draft", "pending", "submitted", "approved", "rejected"] as const;
 
@@ -48,6 +52,7 @@ export async function GET(request: Request) {
       ...t,
       buttons: parseJsonColumn(t.buttons),
       variableCount: countVariables(t.body),
+      namedParams: namedParams(t.body),
     })),
   );
 }
