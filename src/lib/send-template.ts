@@ -146,7 +146,17 @@ export async function sendTemplateMessage(
       whatsappNumberId: number.id,
       templateId: template.id,
       recipientPhone: recipient,
-      templateVariables: variables?.length ? JSON.stringify(variables) : null,
+      // Persist whatever variable values were actually sent so message history
+      // can show "what was sent". Named-map form (public API `templateParams`)
+      // is stored as a JSON object; positional form as a JSON array. Without
+      // this, named-template sends (e.g. niqen_invite) saved nothing and their
+      // history/preview showed only raw {{name}} placeholders.
+      templateVariables:
+        namedParams && Object.keys(namedParams).length > 0
+          ? JSON.stringify(namedParams)
+          : variables?.length
+            ? JSON.stringify(variables)
+            : null,
       status: "queued",
     },
   });
