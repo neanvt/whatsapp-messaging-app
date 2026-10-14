@@ -218,9 +218,11 @@ export async function sendTemplateMessage(
           sql: "INSERT INTO MediaStore (id, mimeType, filename, dataBase64, createdAt) VALUES (?, ?, ?, ?, ?)",
           args: [mid, mimeType, resolvedFilename, rawBase64, new Date().toISOString()],
         });
-        const rawAppBase = (process.env.APP_URL || process.env.NEXTAUTH_URL || "https://wa-neanv.vercel.app").replace(/\/+$/, "");
+        const rawAppBase = (process.env.APP_URL || process.env.NEXTAUTH_URL || "https://wa.digineanv.app").replace(/\/+$/, "");
+        // Meta must fetch header media over a public URL — never a localhost
+        // address, which it cannot reach. Fall back to the production domain.
         const appBase = (rawAppBase.includes("localhost") || rawAppBase.includes("127.0.0.1"))
-          ? "https://wa-neanv.vercel.app"
+          ? "https://wa.digineanv.app"
           : rawAppBase;
         docUrl = `${appBase.replace(/\/+$/, "")}/api/v1/media/${mid}`;
         console.log("[Send] Stored base64 in MediaStore, docUrl:", docUrl);

@@ -627,6 +627,18 @@ There is no test runner installed; these two checks are the full gate.
 
 ## Change log
 
+### 2026-10-19 — Production domain is wa.digineanv.app
+- Replaced the old `wa-neanv.vercel.app` hardcoded fallbacks in
+  `src/lib/send-template.ts` (header-media URL builder) with
+  `https://wa.digineanv.app`; still prefers `APP_URL` / `NEXTAUTH_URL`, only
+  falls back for localhost (Meta cannot fetch a localhost media URL).
+- Updated all `/docs` curl examples from `your-app.com` to
+  `https://wa.digineanv.app`. Documented `NEXTAUTH_URL` / optional `APP_URL` as
+  the production base in `.env.example`.
+- Webhook callback URL is now **https://wa.digineanv.app/api/webhooks/whatsapp**
+  (register in the Meta app config; set NEXTAUTH_URL=https://wa.digineanv.app plus
+  META_APP_SECRET + META_WEBHOOK_VERIFY_TOKEN in the deploy env).
+
 ### 2026-10-14 — Message history/detail visibility + third-party message-list API (implemented)
 - **New pure helper `resolveBodyPreview(body, templateVariables)` in
   `src/lib/template-params.ts`** — substitutes stored variable VALUES into a

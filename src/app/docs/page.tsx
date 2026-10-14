@@ -522,7 +522,7 @@ export default function DocsPage() {
               credit deducted and no message row persisted.
             </p>
             <CodeBlock>{`# Positional (numbered template)
-curl -X POST https://your-app.com/api/v1/messages \\
+curl -X POST https://wa.digineanv.app/api/v1/messages \\
   -H "Authorization: Bearer wa_live_xxxxxxxx" \\
   -H "Content-Type: application/json" \\
   -d '{"recipient":"15551234567","templateName":"order_update","variables":["1234"]}'
@@ -530,7 +530,7 @@ curl -X POST https://your-app.com/api/v1/messages \\
 # Named map (named template, e.g. niqen_invite)
 # This template also has an IMAGE header (send mediaUrl) and a dynamic
 # URL button (send buttonParam) in addition to its named body params.
-curl -X POST https://your-app.com/api/v1/messages \\
+curl -X POST https://wa.digineanv.app/api/v1/messages \\
   -H "Authorization: Bearer wa_live_xxxxxxxx" \\
   -H "Content-Type: application/json" \\
   -d '{"recipient":"15551234567","templateName":"niqen_invite","mediaUrl":"https://example.com/invite.jpg","buttonParam":"abc123","templateParams":{"event":"E","guest_name":"G","event_name":"N","event_date":"D","venue_name":"V","allowed_guests":"2","pass_url":"https://example.com/pass","card_url":"https://example.com/card"}}'`}</CodeBlock>
@@ -560,7 +560,7 @@ curl -X POST https://your-app.com/api/v1/messages \\
               <strong>Auth:</strong> API key (Bearer). Returns the status of one
               message sent through the key&apos;s bound number.
             </p>
-            <CodeBlock>{`curl https://your-app.com/api/v1/messages/MESSAGE_ID \\
+            <CodeBlock>{`curl https://wa.digineanv.app/api/v1/messages/MESSAGE_ID \\
   -H "Authorization: Bearer wa_live_xxxxxxxx"`}</CodeBlock>
             <p className="text-gray-700">
               <strong>200:</strong>
@@ -686,7 +686,7 @@ curl -X POST https://your-app.com/api/v1/messages \\
               createdAt, direction, normalized templateVariables, and
               bodyPreview).
             </p>
-            <CodeBlock>{`curl "https://your-app.com/api/v1/messages?limit=50&status=delivered&since=2026-10-13T12:00:00+05:30" \\
+            <CodeBlock>{`curl "https://wa.digineanv.app/api/v1/messages?limit=50&status=delivered&since=2026-10-13T12:00:00+05:30" \\
   -H "Authorization: Bearer wa_live_xxxxxxxx"`}</CodeBlock>
             <p className="text-gray-700">
               <strong>200:</strong>
@@ -789,7 +789,7 @@ curl -X POST https://your-app.com/api/v1/messages \\
               <code className="font-mono text-sm">approved</code>,{" "}
               <code className="font-mono text-sm">rejected</code>).
             </p>
-            <CodeBlock>{`curl "https://your-app.com/api/v1/templates?status=approved" \\
+            <CodeBlock>{`curl "https://wa.digineanv.app/api/v1/templates?status=approved" \\
   -H "Authorization: Bearer wa_live_xxxxxxxx"`}</CodeBlock>
             <p className="text-gray-700">
               <strong>200:</strong> each template includes its body (with{" "}
@@ -863,7 +863,7 @@ curl -X POST https://your-app.com/api/v1/messages \\
               scoped to the key owner. A template that does not exist or belongs to
               another account returns an identical 404.
             </p>
-            <CodeBlock>{`curl https://your-app.com/api/v1/templates/TEMPLATE_ID \\
+            <CodeBlock>{`curl https://wa.digineanv.app/api/v1/templates/TEMPLATE_ID \\
   -H "Authorization: Bearer wa_live_xxxxxxxx"`}</CodeBlock>
             <p className="text-gray-700">
               <strong>200:</strong>
@@ -1054,7 +1054,7 @@ curl -X POST https://your-app.com/api/v1/messages \\
               <code className="font-mono text-sm">companyName</code> (string,
               optional).
             </p>
-            <CodeBlock>{`curl -X POST https://your-app.com/api/auth/register \\
+            <CodeBlock>{`curl -X POST https://wa.digineanv.app/api/auth/register \\
   -H "Content-Type: application/json" \\
   -d '{"fullName":"Jane Dev","email":"jane@example.com","password":"s3cret","companyName":"Acme"}'`}</CodeBlock>
             <p className="text-gray-700">
@@ -1090,7 +1090,7 @@ curl -X POST https://your-app.com/api/v1/messages \\
               <strong>Auth:</strong> session. Lists your WhatsApp numbers (the
               encrypted access token is stripped from the response).
             </p>
-            <CodeBlock>{`curl https://your-app.com/api/numbers --cookie "next-auth.session-token=YOUR_SESSION_COOKIE"`}</CodeBlock>
+            <CodeBlock>{`curl https://wa.digineanv.app/api/numbers --cookie "next-auth.session-token=YOUR_SESSION_COOKIE"`}</CodeBlock>
             <p className="text-gray-700">
               <strong>200:</strong> an array of number objects, e.g.
             </p>
@@ -1145,7 +1145,7 @@ curl -X POST https://your-app.com/api/v1/messages \\
               <code className="font-mono text-sm">label</code> (string ≤100,
               optional).
             </p>
-            <CodeBlock>{`curl -X POST https://your-app.com/api/numbers/manual \\
+            <CodeBlock>{`curl -X POST https://wa.digineanv.app/api/numbers/manual \\
   -H "Content-Type: application/json" \\
   --cookie "next-auth.session-token=YOUR_SESSION_COOKIE" \\
   -d '{"wabaId":"YOUR_WABA_ID","phoneNumberId":"YOUR_PHONE_NUMBER_ID","accessToken":"YOUR_ACCESS_TOKEN","label":"Support line"}'`}</CodeBlock>
@@ -1177,7 +1177,7 @@ curl -X POST https://your-app.com/api/v1/messages \\
               (string, optional), <code className="font-mono text-sm">wabaId</code>{" "}
               (string, optional — resolved from the token if omitted).
             </p>
-            <CodeBlock>{`curl -X POST https://your-app.com/api/numbers/embedded-signup \\
+            <CodeBlock>{`curl -X POST https://wa.digineanv.app/api/numbers/embedded-signup \\
   -H "Content-Type: application/json" \\
   --cookie "next-auth.session-token=YOUR_SESSION_COOKIE" \\
   -d '{"code":"OAUTH_CODE_FROM_POPUP"}'`}</CodeBlock>
@@ -1265,7 +1265,7 @@ curl -X POST https://your-app.com/api/v1/messages \\
               <code className="font-mono text-sm">variables[0]</code> must be the
               OTP code).
             </p>
-            <CodeBlock>{`curl -X POST https://your-app.com/api/messages/send \\
+            <CodeBlock>{`curl -X POST https://wa.digineanv.app/api/messages/send \\
   -H "Content-Type: application/json" \\
   --cookie "next-auth.session-token=YOUR_SESSION_COOKIE" \\
   -d '{"numberId":"num_123","recipient":"15551234567","templateId":"tpl_456","variables":["123456"]}'`}</CodeBlock>
@@ -1291,7 +1291,7 @@ curl -X POST https://your-app.com/api/v1/messages \\
               messages (newest first), each with its template name and the
               sending number&apos;s phone.
             </p>
-            <CodeBlock>{`curl https://your-app.com/api/messages --cookie "next-auth.session-token=YOUR_SESSION_COOKIE"`}</CodeBlock>
+            <CodeBlock>{`curl https://wa.digineanv.app/api/messages --cookie "next-auth.session-token=YOUR_SESSION_COOKIE"`}</CodeBlock>
             <p className="text-gray-700 text-sm">
               <strong>Errors:</strong> 401 unauthorized; 500 server error.
             </p>
@@ -1350,7 +1350,7 @@ curl -X POST https://your-app.com/api/v1/messages \\
               <code className="font-mono text-sm">whatsappNumberId</code> (string,
               optional — defaults to your first verified number).
             </p>
-            <CodeBlock>{`curl -X POST https://your-app.com/api/chat/15559876543/send \\
+            <CodeBlock>{`curl -X POST https://wa.digineanv.app/api/chat/15559876543/send \\
   -H "Content-Type: application/json" \\
   --cookie "next-auth.session-token=YOUR_SESSION_COOKIE" \\
   -d '{"message":"Thanks for reaching out!","whatsappNumberId":"num_123"}'`}</CodeBlock>
@@ -1394,7 +1394,7 @@ curl -X POST https://your-app.com/api/v1/messages \\
               <code className="font-mono text-sm">mediaAttachments</code>,{" "}
               <code className="font-mono text-sm">status</code> (all optional).
             </p>
-            <CodeBlock>{`curl -X POST https://your-app.com/api/templates \\
+            <CodeBlock>{`curl -X POST https://wa.digineanv.app/api/templates \\
   -H "Content-Type: application/json" \\
   --cookie "next-auth.session-token=YOUR_SESSION_COOKIE" \\
   -d '{"name":"order_update","category":"utility","language":"en","body":"Your order {{1}} has shipped."}'`}</CodeBlock>
@@ -1441,7 +1441,7 @@ curl -X POST https://your-app.com/api/v1/messages \\
               <code className="font-mono text-sm">numberId</code> (string —
               required when you have more than one connected number).
             </p>
-            <CodeBlock>{`curl -X POST https://your-app.com/api/templates/tpl_456/submit \\
+            <CodeBlock>{`curl -X POST https://wa.digineanv.app/api/templates/tpl_456/submit \\
   -H "Content-Type: application/json" \\
   --cookie "next-auth.session-token=YOUR_SESSION_COOKIE" \\
   -d '{"sampleValues":["12345"],"numberId":"num_123"}'`}</CodeBlock>
@@ -1513,7 +1513,7 @@ curl -X POST https://your-app.com/api/v1/messages \\
               secret), <code className="font-mono text-sm">configId</code> (string
               | null — null clears, omit keeps).
             </p>
-            <CodeBlock>{`curl -X PUT https://your-app.com/api/meta-app \\
+            <CodeBlock>{`curl -X PUT https://wa.digineanv.app/api/meta-app \\
   -H "Content-Type: application/json" \\
   --cookie "next-auth.session-token=YOUR_SESSION_COOKIE" \\
   -d '{"metaAppId":"YOUR_APP_ID","metaAppSecret":"YOUR_APP_SECRET","configId":"YOUR_CONFIG_ID"}'`}</CodeBlock>
