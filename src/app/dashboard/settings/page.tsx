@@ -666,10 +666,12 @@ export default function SettingsPage() {
                     <li>
                       <strong>Embedded Signup Configuration ID</strong>{" "}
                       (optional): in the same app →{" "}
-                      <strong>WhatsApp → Configuration</strong> (or the Embedded
-                      Signup setup). Only needed if you use the one-click
-                      &quot;Connect WhatsApp&quot; popup; leave blank for manual
-                      number connect.
+                      <strong>Facebook Login for Business → Configurations</strong>{" "}
+                      (create one for the WhatsApp Embedded Signup use case if
+                      none exists). It is a long numeric ID. This is NOT on the
+                      WhatsApp → Configuration (webhook) page. Only needed for the
+                      one-click &quot;Connect WhatsApp&quot; popup — leave blank
+                      if you connect numbers manually.
                     </li>
                     <li>
                       Your app must have the <strong>WhatsApp</strong> product
