@@ -1,0 +1,18 @@
+{
+  "verdict": "APPROVED",
+  "findings": [
+    {
+      "severity": "NIT",
+      "location": "§2.1 session route select",
+      "problem": "The explicit select adds `content: true`, which FR2.3 does not enumerate (FR2.3 lists only template.body, templateVariables, direction as additive). It is in-scope for the FR1.2/FR3.2 no-template fallback and is reflected in the client interface, so there is no leak or drift.",
+      "fix": "Optionally add a note in §2.1 that `content` is selected to back the FR1.2/FR3.2 no-template fallback so the enumeration delta is explicit. No logic change."
+    },
+    {
+      "severity": "NIT",
+      "location": "§3.3 ISO_RE / parseSince",
+      "problem": "ISO_RE makes the zone designator mandatory (Z or ±HH:mm), so a zone-less value like 2026-10-13T12:00:00 returns 400. This satisfies FR6.5 (accepts offsets/seconds, not a round-trip) and AC13 passes, but it is a deliberate rejection worth keeping visible.",
+      "fix": "Keep as-is (recommended, avoids ambiguous local time), or make the zone optional with (Z|[+-]\\d{2}:\\d{2})? and default a missing zone to UTC if zone-less input must be tolerated. No change required."
+    }
+  ],
+  "reviewDoc": "/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/.agents/tasks/message-history-public-list-api/design-review.md"
+}
