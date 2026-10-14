@@ -42,6 +42,40 @@ interface MetaAppConfig {
   configId: string | null;
   source: "tenant" | "platform";
   hasSecret: boolean;
+  webhookUrl: string;
+  webhookVerifyToken: string | null;
+}
+
+// Small copy-to-clipboard field for the setup guide values.
+function CopyField({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked — the value is still visible to select manually */
+    }
+  };
+  return (
+    <div className="space-y-1">
+      <p className="text-xs font-medium text-gray-500">{label}</p>
+      <div className="flex items-center gap-2">
+        <code className="flex-1 min-w-0 break-all rounded border bg-gray-50 px-2 py-1.5 font-mono text-xs text-gray-800">
+          {value}
+        </code>
+        <button
+          type="button"
+          onClick={copy}
+          className="shrink-0 rounded border px-2 py-1.5 text-xs text-gray-600 hover:bg-gray-100"
+          aria-label={`Copy ${label}`}
+        >
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 type Tab = "profile" | "security" | "metaApp";
@@ -591,6 +625,104 @@ export default function SettingsPage() {
                   )}
                 </div>
               </form>
+            )}
+
+            {/* ---- Self-service "Bring your own Meta app" guide ---- */}
+            {!loadingCfg && (
+              <div className="mt-6 space-y-5 rounded-lg border bg-blue-50/40 p-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900">
+                    Bring your own Meta app — setup guide
+                  </h3>
+                  <p className="mt-1 text-xs text-gray-600">
+                    Use this if you run your own Meta (Facebook) app. Fill the
+                    three fields above with values from your app, then register
+                    the webhook below inside your Meta app so delivery statuses
+                    and inbound messages reach this platform.
+                  </p>
+                </div>
+
+                {/* Step 1 — where to get the credentials */}
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-gray-800">
+                    1. Where to find the values above
+                  </p>
+                  <ul className="list-disc space-y-1.5 pl-5 text-xs text-gray-700">
+                    <li>
+                      <strong>Meta App ID</strong> and{" "}
+                      <strong>Meta App Secret</strong>:{" "}
+                      <a
+                        href="https://developers.facebook.com/apps"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 underline"
+                      >
+                        developers.facebook.com/apps
+                      </a>{" "}
+                      → open your app → <strong>App settings → Basic</strong>.
+                      The App ID is shown at the top; click{" "}
+                      <strong>Show</strong> next to App Secret to reveal it.
+                    </li>
+                    <li>
+                      <strong>Embedded Signup Configuration ID</strong>{" "}
+                      (optional): in the same app →{" "}
+                      <strong>WhatsApp → Configuration</strong> (or the Embedded
+                      Signup setup). Only needed if you use the one-click
+                      &quot;Connect WhatsApp&quot; popup; leave blank for manual
+                      number connect.
+                    </li>
+                    <li>
+                      Your app must have the <strong>WhatsApp</strong> product
+                      added and (to serve other businesses) App Review for{" "}
+                      <code className="font-mono">
+                        whatsapp_business_management
+                      </code>{" "}
+                      +{" "}
+                      <code className="font-mono">
+                        whatsapp_business_messaging
+                      </code>
+                      . Clear any items under <strong>Required actions</strong>{" "}
+                      first.
+                    </li>
+                  </ul>
+                </div>
+
+                {/* Step 2 — register the webhook in their app */}
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-gray-800">
+                    2. Register this webhook inside your Meta app
+                  </p>
+                  <p className="text-xs text-gray-600">
+                    In your Meta app → <strong>WhatsApp → Configuration →
+                    Webhook</strong>, paste these two values, click{" "}
+                    <strong>Verify and save</strong>, then subscribe to the{" "}
+                    <code className="font-mono">messages</code> field. Finally
+                    subscribe your WhatsApp Business Account (WABA) to the app.
+                  </p>
+                  {cfg && (
+                    <div className="space-y-3">
+                      <CopyField label="Callback URL" value={cfg.webhookUrl} />
+                      {cfg.webhookVerifyToken ? (
+                        <CopyField
+                          label="Verify token"
+                          value={cfg.webhookVerifyToken}
+                        />
+                      ) : (
+                        <p className="text-xs text-amber-700">
+                          Verify token is not configured on the server yet —
+                          contact your platform administrator.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <p className="text-xs text-gray-500">
+                  After both steps, send a test message and open its detail in{" "}
+                  <strong>Bulk Messages</strong> to confirm the status updates to
+                  delivered/read.
+                </p>
+              </div>
             )}
           </CardContent>
         </Card>

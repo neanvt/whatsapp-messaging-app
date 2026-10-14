@@ -15,13 +15,31 @@ function serializeMetaApp(row: TenantMetaApp | null): {
   configId: string | null;
   source: "tenant" | "platform";
   hasSecret: boolean;
+  // Setup helpers for the "bring your own Meta app" guide. The webhook URL and
+  // verify token are the SAME for every tenant (the verify token is the shared
+  // platform handshake value; per-app security is the per-app POST signature).
+  // The verify token is NOT a secret in the request-authenticity sense — Meta
+  // echoes it publicly during the GET handshake — so surfacing it to the
+  // authenticated owner for copy-paste is safe.
+  webhookUrl: string;
+  webhookVerifyToken: string | null;
 } {
+  const appBase = (
+    process.env.APP_URL ||
+    process.env.NEXTAUTH_URL ||
+    "https://wa.digineanv.app"
+  ).replace(/\/+$/, "");
+  const webhookUrl = `${appBase}/api/webhooks/whatsapp`;
+  const webhookVerifyToken = process.env.META_WEBHOOK_VERIFY_TOKEN ?? null;
+
   if (row) {
     return {
       appId: row.metaAppId,
       configId: row.configId ?? null,
       source: "tenant",
       hasSecret: true,
+      webhookUrl,
+      webhookVerifyToken,
     };
   }
   return {
@@ -29,6 +47,8 @@ function serializeMetaApp(row: TenantMetaApp | null): {
     configId: process.env.NEXT_PUBLIC_META_CONFIG_ID ?? null,
     source: "platform",
     hasSecret: false,
+    webhookUrl,
+    webhookVerifyToken,
   };
 }
 

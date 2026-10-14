@@ -627,6 +627,20 @@ There is no test runner installed; these two checks are the full gate.
 
 ## Change log
 
+### 2026-10-19 (f) — Self-service "Bring your own Meta app" guide on Settings
+- Added a setup-guide panel to the Settings → Meta App tab: step-by-step on
+  WHERE to get the Meta App ID / App Secret (developers.facebook.com/apps →
+  App settings → Basic) and the optional Embedded Signup Config ID (WhatsApp →
+  Configuration), plus copy-to-clipboard fields for the exact Callback URL
+  (`<APP_URL>/api/webhooks/whatsapp`) and the shared Verify token to paste into
+  the tenant's own Meta app, and instructions to subscribe to `messages` + the
+  WABA. Lets own-app tenants (e.g. Surshyam) self-onboard.
+- `GET /api/meta-app` now also returns `webhookUrl` (derived from APP_URL/
+  NEXTAUTH_URL, default https://wa.digineanv.app) and `webhookVerifyToken`
+  (the shared META_WEBHOOK_VERIFY_TOKEN — safe to show the authenticated owner;
+  Meta echoes it publicly during the handshake, and real security is the
+  per-app POST signature).
+
 ### 2026-10-19 — Production domain is wa.digineanv.app
 - Replaced the old `wa-neanv.vercel.app` hardcoded fallbacks in
   `src/lib/send-template.ts` (header-media URL builder) with
