@@ -163,6 +163,73 @@ export function resolveBodyParams(
   };
 }
 
+// Resolve a template body to a human-readable preview by substituting the
+// stored variable values into {{name}}/{{n}} placeholders. PURE — no
+// Prisma/fetch/throw. `templateVariables` may be: a positional string[]
+// (numbered form, and today's stored positional form), a { name: value } record
+// (named form, today's stored named-map form), the raw JSON string of either,
+// null, or malformed. Any placeholder with no resolvable value is left intact;
+// extra values are ignored. Never throws (design §1; AC1–AC5).
+export function resolveBodyPreview(
+  body: string | null | undefined,
+  templateVariables:
+    | string
+    | string[]
+    | Record<string, string>
+    | null
+    | undefined,
+): string {
+  // Empty body short-circuit.
+  if (!body) return "";
+
+  // Normalize the values ONCE to array | record | null, bound to `values`.
+  // If a string, parse defensively (replicate parseJsonColumn's contract inline
+  // rather than importing it — template-format.ts imports THIS module, so an
+  // import back would be circular).
+  let parsed: unknown = templateVariables;
+  if (typeof templateVariables === "string") {
+    try {
+      parsed = JSON.parse(templateVariables);
+    } catch {
+      parsed = null;
+    }
+  }
+  // Collapse to a container or null with the exact same rule shapePublicMessage
+  // uses — a scalar/undefined/null/malformed value all become null.
+  const values: string[] | Record<string, string> | null = Array.isArray(parsed)
+    ? (parsed as string[])
+    : parsed && typeof parsed === "object"
+      ? (parsed as Record<string, string>)
+      : null;
+
+  // Classify the body so named-vs-numbered never drifts from the send path.
+  const model = parseTemplateBody(body);
+  if (model.kind === "none") return body;
+
+  // Fresh (non module-level) regex so no stateful lastIndex leaks across calls.
+  return body.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, token: string) => {
+    let value: unknown;
+    if (model.kind === "numbered") {
+      // token is numeric for a numbered body; resolve only against an array.
+      if (Array.isArray(values)) {
+        const idx = Number(token) - 1;
+        if (idx >= 0 && idx < values.length) value = values[idx];
+      }
+    } else {
+      // named body
+      if (Array.isArray(values)) {
+        // Positional array stored for a named template — map by declared order.
+        const i = model.names.indexOf(token);
+        if (i >= 0 && i < values.length) value = values[i];
+      } else if (values) {
+        // Record (common named-send shape). null → leave every {{name}} intact.
+        value = values[token];
+      }
+    }
+    return value === undefined || value === null ? match : String(value);
+  });
+}
+
 // True iff the template's buttons JSON declares a URL button whose `url`
 // contains a {{...}} variable (i.e. a dynamic URL button). Parses defensively —
 // never throws; treats null/garbage as "no dynamic button". index resolution is

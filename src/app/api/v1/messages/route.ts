@@ -4,6 +4,33 @@ import prisma from "@/lib/db";
 import { authenticateApiKey, unauthorized } from "@/lib/api-auth";
 import { isSuperAdminUser } from "@/lib/api-key";
 import { sendTemplateMessage } from "@/lib/send-template";
+import { shapePublicMessage } from "@/lib/template-format";
+import type { Prisma } from "@prisma/client";
+
+// --- GET /api/v1/messages (LIST) local validators (non-exported) -----------
+// `received` is deliberately NOT a valid public FILTER value (public sends are
+// outbound), though an inbound row's status "received" can still be RETURNED in
+// an unfiltered page (design §3.3).
+const KNOWN_STATUS = [
+  "queued",
+  "sent",
+  "delivered",
+  "read",
+  "failed",
+] as const;
+
+// ISO 8601 instant: date + time, optional fractional seconds, mandatory zone
+// designator (Z or ±HH:mm). Accepts offsets and seconds precision; rejects bare
+// years / locale strings. Deliberately NOT a strict toISOString round-trip
+// (that wrongly rejects `+05:30` and no-millisecond forms) — design §3.3.
+const ISO_RE =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/;
+
+function parseSince(s: string): Date | null {
+  if (!ISO_RE.test(s)) return null;
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
 
 const Body = z
   .object({
@@ -130,6 +157,119 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("Error sending public message:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
+  }
+}
+
+// GET - Public message LIST + status. API-key auth only; every query is scoped
+// to BOTH the key owner (ctx.userId) AND the key's bound number (ctx.number.id)
+// so a key can never see another number/tenant's rows. Keyset pagination over
+// the compound (createdAt desc, id desc) order; an unknown/deleted `after`
+// cursor returns an empty page (no 404, no existence oracle). The key and query
+// params are never logged (design §3).
+export async function GET(request: Request) {
+  try {
+    const ctx = await authenticateApiKey(request);
+    if (!ctx) return unauthorized();
+
+    const url = new URL(request.url);
+
+    // limit: positive integer, default 50, max 100; else fall back to 50.
+    const rawLimit = url.searchParams.get("limit");
+    const n = Number(rawLimit);
+    const limit = Number.isInteger(n) && n > 0 ? Math.min(n, 100) : 50;
+
+    // status: optional; must be in the send-lifecycle allow-list.
+    const status = url.searchParams.get("status");
+    if (status && !(KNOWN_STATUS as readonly string[]).includes(status)) {
+      return NextResponse.json(
+        {
+          error: `Invalid status. Allowed: ${KNOWN_STATUS.join(", ")}.`,
+        },
+        { status: 400 },
+      );
+    }
+
+    // since: optional ISO 8601 instant; filters createdAt strictly after it.
+    const rawSince = url.searchParams.get("since");
+    let since: Date | null = null;
+    if (rawSince !== null) {
+      since = parseSince(rawSince);
+      if (!since) {
+        return NextResponse.json(
+          {
+            error:
+              "Invalid 'since' timestamp; expected an ISO 8601 instant (e.g. 2026-10-13T12:00:00.000Z or 2026-10-13T12:00:00+05:30).",
+          },
+          { status: 400 },
+        );
+      }
+    }
+
+    // Base scope — ALWAYS owner + bound number; additive filters never widen it.
+    const where: Prisma.MessageWhereInput = {
+      userId: ctx.userId,
+      whatsappNumberId: ctx.number.id,
+    };
+    if (status) where.status = status;
+    if (since) where.createdAt = { gt: since };
+
+    // after: keyset cursor. Resolve the anchor row within scope; an unknown /
+    // deleted / cross-tenant id returns an empty page (no oracle).
+    const after = url.searchParams.get("after");
+    if (after) {
+      const anchor = await prisma.message.findFirst({
+        where: {
+          id: after,
+          userId: ctx.userId,
+          whatsappNumberId: ctx.number.id,
+        },
+        select: { createdAt: true, id: true },
+      });
+      if (!anchor) {
+        return NextResponse.json({ data: [], nextCursor: null, hasMore: false });
+      }
+      where.OR = [
+        { createdAt: { lt: anchor.createdAt } },
+        { createdAt: anchor.createdAt, id: { lt: anchor.id } },
+      ];
+    }
+
+    const rows = await prisma.message.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
+      select: {
+        id: true,
+        recipientPhone: true,
+        templateId: true,
+        status: true,
+        metaMessageId: true,
+        errorMessage: true,
+        sentAt: true,
+        deliveredAt: true,
+        readAt: true,
+        createdAt: true,
+        direction: true,
+        templateVariables: true,
+        template: { select: { name: true, body: true } },
+      },
+    });
+
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    const nextCursor = hasMore ? page[page.length - 1].id : null;
+
+    return NextResponse.json({
+      data: page.map(shapePublicMessage),
+      nextCursor,
+      hasMore,
+    });
+  } catch (error) {
+    console.error("Error listing public messages:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },

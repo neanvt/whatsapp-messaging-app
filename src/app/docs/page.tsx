@@ -26,7 +26,7 @@ function Method({ children }: { children: string }) {
 }
 
 export default function DocsPage() {
-  const lastUpdated = "March 22, 2026";
+  const lastUpdated = "October 14, 2026";
 
   const toc: Array<{ id: string; label: string }> = [
     { id: "overview", label: "1. Overview" },
@@ -567,15 +567,29 @@ curl -X POST https://your-app.com/api/v1/messages \\
             </p>
             <CodeBlock>{`{
   "id": "msg_789",
-  "status": "delivered",
   "recipientPhone": "15551234567",
+  "templateId": "tpl_456",
+  "templateName": "order_update",
+  "status": "delivered",
   "metaMessageId": "wamid.XXXX",
   "errorMessage": null,
   "sentAt": "2026-10-13T12:00:00.000Z",
   "deliveredAt": "2026-10-13T12:00:03.000Z",
   "readAt": null,
-  "createdAt": "2026-10-13T12:00:00.000Z"
+  "createdAt": "2026-10-13T12:00:00.000Z",
+  "direction": "outbound",
+  "templateVariables": ["1234"],
+  "bodyPreview": "Hi 1234, your order has shipped."
 }`}</CodeBlock>
+            <p className="text-gray-700 text-sm">
+              <code className="font-mono text-sm">templateVariables</code> is the
+              values actually sent, normalized to an array (numbered templates),
+              an object (named templates), or{" "}
+              <code className="font-mono text-sm">null</code>;{" "}
+              <code className="font-mono text-sm">bodyPreview</code> is the
+              template body with those values substituted (placeholders with no
+              value are left intact).
+            </p>
             <p className="text-gray-700 text-sm">
               <strong>Errors:</strong> 401 missing/invalid key; 404 unknown
               message id (an id that does not exist, or one owned by another
@@ -595,6 +609,166 @@ curl -X POST https://your-app.com/api/v1/messages \\
               so signed status POSTs fail verification, or the WABA not being
               subscribed to the <code className="font-mono text-sm">messages</code>{" "}
               webhook field. This is unrelated to template-variable formatting.
+            </p>
+          </div>
+
+          {/* GET /api/v1/messages (LIST) */}
+          <div className="space-y-2 border-t pt-5">
+            <h3 className="text-lg font-semibold text-gray-900">
+              <Method>GET</Method>/api/v1/messages
+            </h3>
+            <p className="text-gray-700">
+              <strong>Auth:</strong> API key (Bearer). Lists messages sent through
+              the key&apos;s bound number (owner + number scoped) so you can pull
+              delivery/read status in bulk. Ordered newest first (
+              <code className="font-mono text-sm">createdAt</code> descending).
+            </p>
+            <p className="text-gray-700">
+              <strong>Query (all optional):</strong>
+            </p>
+            <ul className="list-disc pl-6 text-gray-700 text-sm space-y-1">
+              <li>
+                <code className="font-mono text-sm">limit</code> — page size,
+                default <code className="font-mono text-sm">50</code>, max{" "}
+                <code className="font-mono text-sm">100</code> (values above 100
+                are clamped; a non-integer or non-positive value falls back to
+                50).
+              </li>
+              <li>
+                <code className="font-mono text-sm">status</code> — filter;
+                accepts only{" "}
+                <code className="font-mono text-sm">
+                  queued | sent | delivered | read | failed
+                </code>
+                . An unknown value returns 400. (Note: inbound rows may be
+                returned with{" "}
+                <code className="font-mono text-sm">status: &quot;received&quot;</code>{" "}
+                in an unfiltered page even though{" "}
+                <code className="font-mono text-sm">received</code> cannot be
+                filtered for.)
+              </li>
+              <li>
+                <code className="font-mono text-sm">since</code> — an ISO 8601
+                instant with a <code className="font-mono text-sm">Z</code> or a{" "}
+                <code className="font-mono text-sm">±HH:mm</code> offset
+                (fractional seconds optional), e.g.{" "}
+                <code className="font-mono text-sm">
+                  2026-10-13T12:00:00.000Z
+                </code>{" "}
+                or{" "}
+                <code className="font-mono text-sm">
+                  2026-10-13T12:00:00+05:30
+                </code>
+                . Returns only rows with{" "}
+                <code className="font-mono text-sm">createdAt</code> strictly
+                after it. An invalid value returns 400.
+              </li>
+              <li>
+                <code className="font-mono text-sm">after</code> — keyset
+                pagination cursor; pass the previous response&apos;s{" "}
+                <code className="font-mono text-sm">nextCursor</code>. An unknown
+                or deleted cursor returns an empty page (not an error).
+              </li>
+            </ul>
+            <p className="text-gray-700">
+              <strong>Envelope:</strong>{" "}
+              <code className="font-mono text-sm">
+                {"{ data, nextCursor, hasMore }"}
+              </code>
+              . Keep requesting with{" "}
+              <code className="font-mono text-sm">?after=&lt;nextCursor&gt;</code>{" "}
+              while <code className="font-mono text-sm">hasMore</code> is true.
+              Each item in <code className="font-mono text-sm">data</code> has the
+              same shape as the single{" "}
+              <code className="font-mono text-sm">GET /api/v1/messages/[id]</code>{" "}
+              response above (id, recipientPhone, templateId, templateName,
+              status, metaMessageId, errorMessage, sentAt, deliveredAt, readAt,
+              createdAt, direction, normalized templateVariables, and
+              bodyPreview).
+            </p>
+            <CodeBlock>{`curl "https://your-app.com/api/v1/messages?limit=50&status=delivered&since=2026-10-13T12:00:00+05:30" \\
+  -H "Authorization: Bearer wa_live_xxxxxxxx"`}</CodeBlock>
+            <p className="text-gray-700">
+              <strong>200:</strong>
+            </p>
+            <CodeBlock>{`{
+  "data": [
+    {
+      "id": "msg_789",
+      "recipientPhone": "15551234567",
+      "templateId": "tpl_456",
+      "templateName": "order_update",
+      "status": "delivered",
+      "metaMessageId": "wamid.XXXX",
+      "errorMessage": null,
+      "sentAt": "2026-10-13T12:00:00.000Z",
+      "deliveredAt": "2026-10-13T12:00:03.000Z",
+      "readAt": null,
+      "createdAt": "2026-10-13T12:00:00.000Z",
+      "direction": "outbound",
+      "templateVariables": ["1234"],
+      "bodyPreview": "Hi 1234, your order has shipped."
+    }
+  ],
+  "nextCursor": "msg_789",
+  "hasMore": true
+}`}</CodeBlock>
+            <p className="text-gray-700 text-sm">
+              <strong>Errors:</strong> 401 missing/invalid key; 400 invalid{" "}
+              <code className="font-mono text-sm">status</code> or{" "}
+              <code className="font-mono text-sm">since</code>.
+            </p>
+          </div>
+
+          {/* Live-status sync pattern */}
+          <div className="space-y-2 border-t pt-5">
+            <h3 className="text-lg font-semibold text-gray-900">
+              Live-status sync pattern
+            </h3>
+            <p className="text-gray-700">
+              To keep your own records in sync with delivery/read status without
+              running a webhook on your side:
+            </p>
+            <ol className="list-decimal pl-6 text-gray-700 text-sm space-y-1">
+              <li>
+                On <code className="font-mono text-sm">POST /api/v1/messages</code>
+                , store the returned{" "}
+                <code className="font-mono text-sm">id</code> (and optionally{" "}
+                <code className="font-mono text-sm">metaMessageId</code>) against
+                your own record.
+              </li>
+              <li>
+                Poll{" "}
+                <code className="font-mono text-sm">
+                  GET /api/v1/messages/{"{id}"}
+                </code>{" "}
+                for one record, <strong>or</strong>{" "}
+                <code className="font-mono text-sm">
+                  GET /api/v1/messages?since=&lt;lastSyncISO&gt;
+                </code>{" "}
+                (then page with{" "}
+                <code className="font-mono text-sm">after</code>) to pull all
+                status changes in bulk.
+              </li>
+              <li>
+                Reconcile{" "}
+                <code className="font-mono text-sm">delivered</code>/
+                <code className="font-mono text-sm">read</code>/
+                <code className="font-mono text-sm">failed</code> plus the
+                timestamps and{" "}
+                <code className="font-mono text-sm">errorMessage</code> onto your
+                own data.
+              </li>
+            </ol>
+            <p className="text-gray-700 text-sm">
+              The delivery-status caveat noted on the single-message endpoint (the
+              app-level webhook secret and the{" "}
+              <code className="font-mono text-sm">messages</code> subscription
+              must be configured on this platform) still applies — if those are
+              not set, statuses stay at{" "}
+              <code className="font-mono text-sm">sent</code> and the sync will not
+              observe <code className="font-mono text-sm">delivered</code>/
+              <code className="font-mono text-sm">read</code> transitions.
             </p>
           </div>
 

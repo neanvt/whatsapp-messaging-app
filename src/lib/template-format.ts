@@ -2,7 +2,11 @@
 // Kept out of the route files because Next.js route modules may only export
 // HTTP method handlers (GET/POST/...), not arbitrary functions.
 
-import { parseTemplateBody, namedParams } from "@/lib/template-params";
+import {
+  parseTemplateBody,
+  namedParams,
+  resolveBodyPreview,
+} from "@/lib/template-params";
 
 // Re-export the ordered, de-duplicated declared named parameters so the
 // templates route and docs share one derivation (design §4.1).
@@ -26,4 +30,54 @@ export function parseJsonColumn(value: string | null): unknown {
   } catch {
     return null;
   }
+}
+
+// The exact Prisma `select` shape both public message routes feed into the
+// shared shaper below (list + single [id]). Keeping it as an interface pins the
+// select on both ends so the two routes can never drift (design §3.6/§3.7).
+export interface PublicMessageRow {
+  id: string;
+  recipientPhone: string;
+  templateId: string | null;
+  status: string;
+  metaMessageId: string | null;
+  errorMessage: string | null;
+  sentAt: Date | null;
+  deliveredAt: Date | null;
+  readAt: Date | null;
+  createdAt: Date;
+  direction: string;
+  templateVariables: string | null;
+  template: { name: string; body: string | null } | null;
+}
+
+// Shape a Message row for the public /api/v1 responses so the LIST and the
+// single [id] route return byte-identical field names and parsing (design
+// §3.7). parseJsonColumn (defined above, same module) never throws and returns
+// `unknown`; a legacy/malformed write could be a JSON scalar, so NORMALIZE to
+// the documented array | record | null type before BOTH returning it and
+// feeding resolveBodyPreview — never leak a raw scalar.
+export function shapePublicMessage(m: PublicMessageRow) {
+  const raw = parseJsonColumn(m.templateVariables);
+  const vars: string[] | Record<string, string> | null = Array.isArray(raw)
+    ? (raw as string[])
+    : raw && typeof raw === "object"
+      ? (raw as Record<string, string>)
+      : null;
+  return {
+    id: m.id,
+    recipientPhone: m.recipientPhone,
+    templateId: m.templateId,
+    templateName: m.template?.name ?? null,
+    status: m.status,
+    metaMessageId: m.metaMessageId,
+    errorMessage: m.errorMessage,
+    sentAt: m.sentAt,
+    deliveredAt: m.deliveredAt,
+    readAt: m.readAt,
+    createdAt: m.createdAt,
+    direction: m.direction,
+    templateVariables: vars,
+    bodyPreview: resolveBodyPreview(m.template?.body, vars),
+  };
 }

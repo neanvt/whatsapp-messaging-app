@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -11,19 +11,47 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { MessageSquare, RefreshCw, Send, Search } from "lucide-react";
+import {
+  MessageSquare,
+  RefreshCw,
+  Send,
+  Search,
+  ChevronRight,
+  ChevronDown,
+} from "lucide-react";
 import Link from "next/link";
+import { resolveBodyPreview } from "@/lib/template-params";
 
 interface Message {
   id: string;
   recipientPhone: string;
   status: string;
+  direction: string;
+  templateVariables: string | null;
+  errorMessage: string | null;
+  content: string | null;
   sentAt: string | null;
   deliveredAt: string | null;
   readAt: string | null;
-  template: { name: string } | null;
+  createdAt: string;
+  template: { name: string; body: string | null } | null;
   whatsappNumber: { phoneNumber: string } | null;
-  errorMessage: string | null;
+}
+
+// Parse the stored templateVariables JSON string defensively — never throw.
+function safeParse(
+  value: string | null,
+): string[] | Record<string, string> | null {
+  if (!value) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed as string[];
+    if (parsed && typeof parsed === "object")
+      return parsed as Record<string, string>;
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export default function MessagesPage() {
@@ -32,6 +60,7 @@ export default function MessagesPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [search, setSearch] = useState("");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchMessages();
@@ -62,12 +91,14 @@ export default function MessagesPage() {
     switch (status) {
       case "delivered":
         return <Badge variant="success">Delivered</Badge>;
+      case "read":
+        return <Badge variant="default">Read</Badge>;
       case "sent":
         return <Badge variant="secondary">Sent</Badge>;
-      case "read":
-        return <Badge variant="success">Read</Badge>;
       case "failed":
         return <Badge variant="destructive">Failed</Badge>;
+      case "received":
+        return <Badge variant="warning">Received</Badge>;
       case "queued":
       default:
         return <Badge variant="outline">Queued</Badge>;
@@ -157,6 +188,7 @@ export default function MessagesPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b bg-gray-50">
+                  <th className="w-10 px-2 py-3" aria-label="Expand" />
                   <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">
                     Recipient
                   </th>
@@ -175,31 +207,150 @@ export default function MessagesPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredMessages.map((message) => (
-                  <tr key={message.id} className="border-b">
-                    <td className="px-4 py-3 text-sm">
-                      {message.recipientPhone}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      {message.template?.name || "N/A"}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      {message.whatsappNumber?.phoneNumber || "N/A"}
-                    </td>
-                    <td className="px-4 py-3">
-                      {getStatusBadge(message.status)}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground">
-                      {message.deliveredAt
-                        ? `Delivered ${new Date(message.deliveredAt).toLocaleString()}`
-                        : message.readAt
-                          ? `Read ${new Date(message.readAt).toLocaleString()}`
-                          : message.sentAt
-                            ? new Date(message.sentAt).toLocaleString()
-                            : "-"}
-                    </td>
-                  </tr>
-                ))}
+                {filteredMessages.map((message) => {
+                  const expanded = expandedId === message.id;
+                  const vars = safeParse(message.templateVariables);
+                  const varEntries = Array.isArray(vars)
+                    ? vars.map((v, i) => [String(i + 1), v] as const)
+                    : vars
+                      ? Object.entries(vars)
+                      : [];
+                  const preview = resolveBodyPreview(
+                    message.template?.body,
+                    message.templateVariables,
+                  );
+                  return (
+                    <React.Fragment key={message.id}>
+                      <tr
+                        className="border-b cursor-pointer hover:bg-gray-50"
+                        onClick={() =>
+                          setExpandedId(expanded ? null : message.id)
+                        }
+                      >
+                        <td className="px-2 py-3 text-muted-foreground">
+                          {expanded ? (
+                            <ChevronDown className="w-4 h-4" />
+                          ) : (
+                            <ChevronRight className="w-4 h-4" />
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          {message.recipientPhone}
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          {message.template?.name || "N/A"}
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          {message.whatsappNumber?.phoneNumber || "N/A"}
+                        </td>
+                        <td className="px-4 py-3">
+                          {getStatusBadge(message.status)}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-muted-foreground">
+                          {message.deliveredAt
+                            ? `Delivered ${new Date(message.deliveredAt).toLocaleString()}`
+                            : message.readAt
+                              ? `Read ${new Date(message.readAt).toLocaleString()}`
+                              : message.sentAt
+                                ? new Date(message.sentAt).toLocaleString()
+                                : "-"}
+                        </td>
+                      </tr>
+                      {expanded && (
+                        <tr className="border-b bg-gray-50/60">
+                          <td colSpan={6} className="px-4 py-4">
+                            <div className="rounded-md bg-muted/40 p-4 space-y-3 text-sm">
+                              <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+                                <div>
+                                  <span className="font-medium">Template: </span>
+                                  {message.template?.name ?? "Free-text / inbound"}
+                                </div>
+                                <div>
+                                  <span className="font-medium">
+                                    Direction:{" "}
+                                  </span>
+                                  {message.direction}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium">Status:</span>
+                                  {getStatusBadge(message.status)}
+                                </div>
+                                <div>
+                                  <span className="font-medium">Sent: </span>
+                                  {message.sentAt
+                                    ? new Date(message.sentAt).toLocaleString()
+                                    : "-"}
+                                </div>
+                                <div>
+                                  <span className="font-medium">
+                                    Delivered:{" "}
+                                  </span>
+                                  {message.deliveredAt
+                                    ? new Date(
+                                        message.deliveredAt,
+                                      ).toLocaleString()
+                                    : "-"}
+                                </div>
+                                <div>
+                                  <span className="font-medium">Read: </span>
+                                  {message.readAt
+                                    ? new Date(message.readAt).toLocaleString()
+                                    : "-"}
+                                </div>
+                              </div>
+
+                              {message.errorMessage && (
+                                <div className="text-destructive">
+                                  <span className="font-medium">Error: </span>
+                                  {message.errorMessage}
+                                </div>
+                              )}
+
+                              {varEntries.length > 0 && (
+                                <div>
+                                  <div className="font-medium mb-1">
+                                    Variables
+                                  </div>
+                                  <ul className="space-y-0.5">
+                                    {varEntries.map(([k, v]) => (
+                                      <li key={k} className="font-mono text-xs">
+                                        {k}: {String(v)}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+
+                              {message.template ? (
+                                preview && (
+                                  <div>
+                                    <div className="font-medium mb-1">
+                                      Resolved body preview
+                                    </div>
+                                    <pre className="whitespace-pre-wrap break-words rounded bg-background p-2 text-xs">
+                                      {preview}
+                                    </pre>
+                                  </div>
+                                )
+                              ) : (
+                                message.content && (
+                                  <div>
+                                    <div className="font-medium mb-1">
+                                      Content
+                                    </div>
+                                    <pre className="whitespace-pre-wrap break-words rounded bg-background p-2 text-xs">
+                                      {message.content}
+                                    </pre>
+                                  </div>
+                                )
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

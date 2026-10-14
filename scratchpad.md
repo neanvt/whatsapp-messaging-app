@@ -1,6 +1,6 @@
 # WhatsApp Business Messaging Platform — Technical Reference
 
-Last updated: 2026-10-19
+Last updated: 2026-10-14
 
 ## Overview
 
@@ -215,7 +215,7 @@ the platform one without a rebuild.
 | POST | `/api/templates/[id]/submit` | Submit template to Meta (per-tenant WABA; optional `numberId` in body) |
 | POST | `/api/templates/[id]/duplicate` | Duplicate a template |
 | POST | `/api/templates/sync` | Sync template statuses from Meta (iterates ALL of the tenant's connected WABAs) |
-| GET/POST | `/api/messages` | List / query messages |
+| GET/POST | `/api/messages` | List / query messages. GET is `session.user.id`-scoped, explicit `select` (NOT include — no `userId`/`whatsappNumberId`/`conversationId`/`metaMessageId` leaked) returning `id,recipientPhone,status,direction,templateVariables (raw),errorMessage,content,sentAt,deliveredAt,readAt,createdAt,template{name,body},whatsappNumber{phoneNumber}`, newest first, take 100 |
 | POST | `/api/messages/send` | **Send a template message via Meta** |
 | GET | `/api/chat/conversations` | List conversations |
 | GET | `/api/chat/[contactPhone]/messages` | Messages for a contact |
@@ -234,7 +234,8 @@ the platform one without a rebuild.
 | GET/POST | `/api/admin/packages` + `/[id]` | Admin package management |
 | GET/POST | `/api/webhooks/whatsapp` | Meta webhook — GET handshake; POST verifies `X-Hub-Signature-256` then routes inbound/status (see Webhook flow) |
 | POST | `/api/v1/messages` | **Public M2M** — send a template via the key's bound number. Auth: `Authorization: Bearer wa_live_...` only (no session, no client credential). Body `{ recipient, templateName \| templateId, variables? \| templateParams? }` (exactly one template key; positional array OR named map, not both). 200 `{ id, status, metaMessageId }` / 400 (incl. pre-charge name/count/header/button mismatch) / 401 / 402 (credits) / 404 (template) / 500 |
-| GET | `/api/v1/messages/[id]` | **Public M2M** — message status. API-key auth; scoped to owner + bound number. 200 projection (`id,status,recipientPhone,metaMessageId,errorMessage,sentAt,deliveredAt,readAt,createdAt`) / 401 / 404 (identical for unknown vs other-owner/number — no oracle) |
+| GET | `/api/v1/messages/[id]` | **Public M2M** — message status. API-key auth; scoped to owner + bound number. Returns `shapePublicMessage` superset (`id,recipientPhone,templateId,templateName,status,metaMessageId,errorMessage,sentAt,deliveredAt,readAt,createdAt,direction,templateVariables (normalized array/object/null),bodyPreview`) / 401 / 404 (identical for unknown vs other-owner/number — no oracle) |
+| GET | `/api/v1/messages` | **Public M2M LIST** — API-key auth; scoped to owner + bound number. Keyset pagination over `orderBy [createdAt desc, id desc]`. Query `?limit=` (default 50, max 100, non-int/non-positive→50), `?status=` in `{queued,sent,delivered,read,failed}` (400 on unknown; `received` returnable but not filterable), `?since=<ISO 8601 w/ Z or ±HH:mm offset>` (400 on invalid; `createdAt > since`), `?after=<messageId>` cursor (unknown/deleted → empty page, no 404). Envelope `{ data, nextCursor, hasMore }`; items use the shared `shapePublicMessage`. 200 / 400 / 401 / 500 |
 | GET | `/api/v1/templates` | **Public M2M** — owner's templates incl. `variableCount` (numbered-only count; `0` for named templates) and `namedParams` (ordered, de-duplicated declared named params; `[]` for numbered/none). API-key auth; optional `?status` validated against draft/pending/submitted/approved/rejected (400 on unknown). 200 list / 401 / 400 |
 | GET | `/api/api-keys` | **Key management (session)** — list the caller's API keys. `select` allow-list (`id,name,keyPrefix,lastUsedAt,revokedAt,createdAt` + bound number `id/phoneNumber/displayPhoneNumber`), **never** `keyHash`. 200 / 401 / 500 |
 | POST | `/api/api-keys` | **Key management (session)** — create a key bound to a verified owned number. zod `{ name, numberId }`; unverified/unowned number → 400. **One-time reveal:** 201 `{ id, name, keyPrefix, whatsappNumberId, lastUsedAt, revokedAt, createdAt, key }` — plaintext `key` returned ONLY here, never stored, never re-returned; `keyHash` never in any response. 400 / 401 / 500 |
@@ -356,8 +357,18 @@ that bound number (any client-supplied number/credential field is ignored).
   status, metaMessageId }` and `ok:false` → the helper code verbatim (402/400/500).
 - **`GET /api/v1/messages/[id]`:** `findFirst` scoped to `{ id, userId,
   whatsappNumberId }` — a non-matching id (unknown OR other-owner/other-number)
-  returns the identical 404; the path id is never logged. Returns a
-  non-credential `select` allow-list.
+  returns the identical 404; the path id is never logged. Widened `select` fed
+  through the shared `shapePublicMessage(row)` so a poller sees the same shape as a
+  list item (back-compatible superset, no `try/catch` added).
+- **`GET /api/v1/messages` (LIST):** `authenticateApiKey` → `unauthorized()`;
+  every query scoped to `{ userId, whatsappNumberId }`. Local non-exported
+  validators `KNOWN_STATUS`/`ISO_RE`/`parseSince`; `limit` = `Number.isInteger(n) &&
+  n>0 ? min(n,100) : 50`; `status`/`since` validated → 400 before the DB. `after`
+  anchor resolved within scope → empty page `{ data:[], nextCursor:null,
+  hasMore:false }` when unknown/deleted (no oracle). Keyset `OR:[{createdAt:{lt}},
+  {createdAt, id:{lt}}]` with compound `orderBy [createdAt desc, id desc]`,
+  `take: limit+1` → slice/`nextCursor`/`hasMore`. Rows mapped by `shapePublicMessage`.
+  `try/catch` logs `"Error listing public messages:"` only (no key/path/query).
 - **`GET /api/v1/templates`:** scoped to `ctx.userId`; optional `?status`
   validated against the known set (400 on unknown); returns an
   `id/name/category/language/status` allow-list, newest first.
@@ -615,6 +626,46 @@ There is no test runner installed; these two checks are the full gate.
   compile step or new dependency.
 
 ## Change log
+
+### 2026-10-14 — Message history/detail visibility + third-party message-list API (implemented)
+- **New pure helper `resolveBodyPreview(body, templateVariables)` in
+  `src/lib/template-params.ts`** — substitutes stored variable VALUES into a
+  template body's `{{name}}`/`{{n}}` placeholders. Normalizes `templateVariables`
+  (JSON string | array | record | null) to array|record|null once (inline
+  `parseJsonColumn` contract to avoid a circular import), classifies the body via
+  `parseTemplateBody`, resolves numbered by index, named by record key or
+  declared-order index. Never throws; missing/extra values leave the placeholder
+  intact. Covered by `scripts/test-resolve-body-preview.mjs` (16 assertions, node
+  built-ins only; temp harness kept in-repo per convention).
+- **New shared shaper `shapePublicMessage(row)` + `PublicMessageRow` interface in
+  `src/lib/template-format.ts`** — normalizes `templateVariables` to
+  array|record|null (never leaks a raw scalar) and returns the public item shape
+  incl. `templateName`, `direction`, normalized `templateVariables`, and
+  `bodyPreview`. Used by BOTH the LIST and single `[id]` public routes so shapes
+  match.
+- **New `GET /api/v1/messages` LIST** alongside the existing `POST` — API-key
+  auth, owner+number scoped, keyset pagination (`limit`/`status`/`since`/`after`),
+  compound `orderBy [createdAt desc, id desc]`, `{ data, nextCursor, hasMore }`
+  envelope. `POST` byte-unchanged.
+- **`GET /api/v1/messages/[id]` refactor** — widened `select` + routed through
+  `shapePublicMessage`; auth/isolation/identical-404/no-logging unchanged; no
+  `try/catch` added.
+- **Session `GET /api/messages`** — switched from `include` to an explicit
+  `select` (stops leaking `userId`/`whatsappNumberId`/`conversationId`/
+  `metaMessageId`; adds `direction`/`templateVariables`/`content`/`template.body`).
+- **Dashboard `src/app/dashboard/messages/page.tsx`** — distinct live-status chips
+  (queued=outline, sent=secondary, delivered=success, read=default, failed=
+  destructive, received=warning) and a per-row expandable DETAIL panel (template
+  name/direction/status/timestamps/errorMessage, parsed variable values, resolved
+  body preview via `resolveBodyPreview`, content fallback for inbound/free-text).
+  "Sent" column precedence (delivered>read>sent) and the existing 10s refresh KEPT.
+- **`/docs`** — new `GET /api/v1/messages` LIST block (params/envelope/curl/200),
+  updated single-route 200 example to the superset shape, added a "Live-status sync
+  pattern" subsection; `lastUpdated` → "October 14, 2026".
+- **Prerequisite (already landed, noted for consumers):** `send-template.ts`
+  persists variable VALUES in `Message.templateVariables` as a JSON OBJECT (named
+  map), a JSON ARRAY (positional), or null — every consumer handles all three.
+- No schema change, no new dependency.
 
 ### 2026-10-13 — Named-parameter template send fix (implemented)
 - **New `src/lib/template-params.ts`** — pure, DB/network-free module:

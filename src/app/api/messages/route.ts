@@ -13,8 +13,19 @@ export async function GET() {
 
     const messages = await prisma.message.findMany({
       where: { userId: session.user.id },
-      include: {
-        template: { select: { name: true } },
+      select: {
+        id: true,
+        recipientPhone: true,
+        status: true,
+        direction: true,
+        templateVariables: true,
+        errorMessage: true,
+        content: true,
+        sentAt: true,
+        deliveredAt: true,
+        readAt: true,
+        createdAt: true,
+        template: { select: { name: true, body: true } },
         whatsappNumber: { select: { phoneNumber: true } },
       },
       orderBy: { createdAt: "desc" },
