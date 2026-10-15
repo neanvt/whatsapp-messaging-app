@@ -1,0 +1,54 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    {
+      "id": 1,
+      "severity": "MEDIUM",
+      "title": "Whitespace-tolerant classifier vs. non-tolerant numberedList/scan diverge",
+      "where": "Design 'Form state -> Numbered' numberedList regex /\\{\\{(\\d+)\\}\\}/g",
+      "problem": "parseTemplateBody classifies with a whitespace-tolerant regex (/\\{\\{\\s*([a-zA-Z0-9_]+)\\s*\\}\\}/g) but the design's numberedList uses a non-tolerant /\\{\\{(\\d+)\\}\\}/g. For a body like {{ 1 }} the classifier returns kind:numbered count:1 while numberedList is [], so no inputs render, variables=[] (length 0), and the send-core gate returns 400 for a template the user cannot fill. The design's claim that the counts 'agree' is false for whitespace-padded numeric tokens.",
+      "fix": "Build numberedList from a whitespace-tolerant numeric scan: [...new Set([...body.matchAll(/\\{\\{\\s*(\\d+)\\s*\\}\\}/g)].map(m=>Number(m[1])))].sort((a,b)=>a-b), so numberedList.length always equals paramModel.count."
+    },
+    {
+      "id": 2,
+      "severity": "MEDIUM",
+      "title": "Auth-template classification stated as 'typically numbered', not pinned",
+      "where": "Design 'Request body construction -> Auth templates' and 'Edge cases -> Auth template'",
+      "problem": "The send core guards category==='authentication' && !variables?.[0] BEFORE the body gate. If an auth template body classifies as named or none, the client sends namedParams/neither with no variables, so variables[0] is undefined and the core returns 400 'OTP code variable required'. FR1.5/AC11 require auth templates to behave as today (OTP is the first variable). The design only says 'typically numbered', leaving no rule for named/none auth bodies.",
+      "fix": "Pin the rule: for category==='authentication', force the numbered branch regardless of paramModel.kind, e.g. const effectiveKind = selectedTemplate?.category==='authentication' ? 'numbered' : paramModel.kind; and drive form/validation/request-body off effectiveKind so variables[0] is always populated."
+    },
+    {
+      "id": 3,
+      "severity": "NIT",
+      "title": "selectedTemplate possibly undefined inside per-recipient loop not addressed",
+      "where": "Design 'Request body construction' derivations inside handleSend",
+      "problem": "paramModel/isMediaHeader/headerKind/hasDynamicButton/numberedList derive from selectedTemplate which can be undefined (templates.find). handleSend early-returns on empty templateId but not on undefined selectedTemplate; derivations fall through to the none branch. Matches today's loose assumption, not a regression, but conflicts with the design's strict-typing posture.",
+      "fix": "Note that selectedTemplate is guaranteed defined when templateId is set (options come from the fetched approved list) and the none-default is a defensive no-op; optionally early-return if !selectedTemplate."
+    },
+    {
+      "id": 4,
+      "severity": "NIT",
+      "title": "Keep category typed as string (non-null) on the Template interface",
+      "where": "Design 'Type surface'",
+      "problem": "Auth logic compares category === 'authentication'. category is always present on the full-row response. Confirming it must stay string, not be widened to string|null.",
+      "fix": "No change needed; keep category: string. Recorded so the implementer does not make it nullable."
+    },
+    {
+      "id": 5,
+      "severity": "NIT",
+      "title": "Preview header box wording slightly overstates media-only",
+      "where": "Design 'Live preview -> Media-header indicator (AC8)'",
+      "problem": "The real preview box renders for any headerType !== 'none' and prints 'Text Header' for text headers and 'Media' for image/video/document. The design's parenthetical implies it prints 'Media' for the media types only, which is accurate but could read as media-only. AC8 (indicate a media header) is satisfied either way.",
+      "fix": "Reword to: the existing header box renders for any non-none header, printing 'Media' for image/video/document and 'Text Header' for text; the media case satisfies AC8. No code change."
+    },
+    {
+      "id": 6,
+      "severity": "NIT",
+      "title": "Confirm session vs public success-shape divergence is intentional",
+      "where": "Design 'Route design -> Unchanged and explicitly preserved'",
+      "problem": "Session route returns { id, status:'sent', message:'...' } (string message) while the public route returns { id, status, metaMessageId }. The design correctly preserves the session shape; recorded to confirm no accidental drift toward the public shape.",
+      "fix": "None. Preserved correctly."
+    }
+  ],
+  "reviewDoc": "/Users/neeleshtentiwala/Desktop/Whatsapp/whatsapp/.agents/tasks/send-named-media-button/send-named-media-design-review.md"
+}

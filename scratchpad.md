@@ -1,6 +1,6 @@
 # WhatsApp Business Messaging Platform — Technical Reference
 
-Last updated: 2026-10-14
+Last updated: 2026-10-20
 
 ## Overview
 
@@ -626,6 +626,53 @@ There is no test runner installed; these two checks are the full gate.
   compile step or new dependency.
 
 ## Change log
+
+### 2026-10-20 (c) — Design REVISION: Send page NAMED/MEDIA/BUTTON (planning only)
+- Revised `.agents/tasks/send-named-media-button/send-named-media-design.md` to resolve all
+  9 design-review findings (`send-named-media-design-review.{json,md}`: 2 HIGH, 3 MEDIUM, 4 NIT).
+- Key resolutions: (1) live-preview snippet no longer accesses `paramModel.names` in the
+  numbered branch (TS2339 fixed) — builds the array from `numberedList`; (2) `numberedList:
+  number[]` now defined once and reused across render/preview/validation/body; (3) numbered
+  index list derived from the distinct `{{n}}` token scan (NOT `1..count`) so numbered POSTs
+  stay byte-identical to today even for non-canonical bodies; (4) numbered `missingVars`
+  restated over `numberedList`; (5) page now sends optional `fileName` for document headers
+  (route already forwards it; blank → core default `receipt.pdf`); (6) recipient `>=7`-digit
+  rule clarified as client-only; (7) existing "Header → Media" box satisfies AC8, URL echo
+  dropped; (8) `SendBody` mutual-exclusivity noted; (9) divergent superadmin models recorded
+  as a known gotcha. No app code changed; design doc + this scratchpad only.
+
+### 2026-10-20 (b) — Design: Send page NAMED/MEDIA/BUTTON templates (planning only)
+- Authored the technical design at `.agents/tasks/send-named-media-button/send-named-media-design.md`
+  (from scratch — no design-review file existed). Design is grounded in the real code:
+  `page.tsx`, `api/messages/send/route.ts`, `lib/template-params.ts`, `lib/send-template.ts`,
+  `api/v1/messages/route.ts`, `api/templates/route.ts`.
+- Decisions locked: the client imports `parseTemplateBody`/`resolveBodyPreview`/
+  `buttonUrlIsDynamic` DIRECTLY from `@/lib/template-params` (confirmed zero imports →
+  client-safe), removing the page's numbered-only `extractVariables`/preview reducer — no
+  duplicated parsing. Page renders by `paramModel.kind` (named map / numbered / none) +
+  `isMediaHeader` (image/video/document) + `hasDynamicButton` (non-auth), submits exactly
+  one body form (`namedParams` map vs positional `variables`), `mediaUrl` for image/video /
+  `documentUrl` for document, `buttonParam` for the dynamic button. Route change is a
+  minimal additive destructure+forward of `namedParams,mediaUrl,documentUrl,fileName,
+  filename,buttonParam,buttonUrlParam`; auth/ownership/status/402→400/response-shape all
+  preserved. `GET /api/templates` needs no change (full row already returned). No change to
+  the send core gate/payload, no schema/dep change.
+- No app code changed in this step (design doc only).
+
+### 2026-10-20 (a) — Requirements: Send page NAMED/MEDIA/BUTTON templates (planning only)
+- Authored requirements at `.agents/tasks/send-named-media-button/send-named-media-requirements.md`
+  for making the dashboard Send page (`src/app/dashboard/messages/send/page.tsx` +
+  `POST /api/messages/send`) able to send templates with named body params, a media
+  header (image/video/document), and/or a dynamic URL button — not just numbered bodies.
+- Root cause confirmed: the Send page only collects positional vars and posts
+  `{numberId,recipient,templateId,variables}`; the session route drops
+  `namedParams/mediaUrl/documentUrl/buttonParam`, so the shared `sendTemplateMessage`
+  pre-charge gate 400s named/media/button templates (e.g. `niqen_invite`) before any row/charge.
+- Verified: `GET /api/templates` (session) already returns the full Template row incl.
+  `buttons`/`headerType` (no `select`) — correcting the task's assumption that they must be
+  added. Fix is client-side form + route plumbing only; reuse `template-params.ts` /
+  `template-format.ts`; no change to the send core gate/payload; no schema/dep change.
+- No app code changed in this step (requirements doc only).
 
 ### 2026-10-19 (f) — Self-service "Bring your own Meta app" guide on Settings
 - Added a setup-guide panel to the Settings → Meta App tab: step-by-step on
