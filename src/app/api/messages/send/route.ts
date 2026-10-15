@@ -16,7 +16,19 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { numberId, recipient, templateId, variables } = body;
+    const {
+      numberId,
+      recipient,
+      templateId,
+      variables,
+      namedParams,
+      mediaUrl,
+      documentUrl,
+      fileName,
+      filename,
+      buttonParam,
+      buttonUrlParam,
+    } = body;
 
     if (!numberId || !recipient || !templateId) {
       return NextResponse.json(
@@ -63,6 +75,13 @@ export async function POST(request: Request) {
       template,
       recipient,
       variables,
+      namedParams,
+      mediaUrl,
+      documentUrl,
+      fileName,
+      filename,
+      buttonParam,
+      buttonUrlParam,
       isSuperAdmin: session.user.role === "superadmin",
     });
 

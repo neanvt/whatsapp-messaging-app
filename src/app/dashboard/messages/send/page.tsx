@@ -39,8 +39,54 @@ interface Template {
   headerType: string | null;
   headerContent: string | null;
   footerContent: string | null;
+  buttons: string | null;
   category: string;
   status: string;
+}
+
+// Parse a template body into its parameter model. Named params ({{event}}) and
+// numbered params ({{1}}) are mutually exclusive in a WhatsApp template; we pick
+// named if ANY non-numeric placeholder appears. Names/numbers are returned in
+// first-occurrence order, de-duplicated — matching the backend's parsing.
+function parseBodyParams(
+  body: string,
+): { kind: "named"; names: string[] } | { kind: "numbered"; numbers: number[] } {
+  const tokens = Array.from(body.matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g)).map(
+    (m) => m[1],
+  );
+  const hasNamed = tokens.some((t) => isNaN(Number(t)));
+  if (hasNamed) {
+    const names: string[] = [];
+    for (const t of tokens) if (isNaN(Number(t)) && !names.includes(t)) names.push(t);
+    return { kind: "named", names };
+  }
+  const numbers: number[] = [];
+  for (const t of tokens) {
+    const n = parseInt(t, 10);
+    if (!Number.isNaN(n) && !numbers.includes(n)) numbers.push(n);
+  }
+  numbers.sort((a, b) => a - b);
+  return { kind: "numbered", numbers };
+}
+
+// Does the template's buttons JSON contain a dynamic URL (a {{...}} placeholder)?
+function templateHasDynamicButton(buttonsJson: string | null): boolean {
+  if (!buttonsJson) return false;
+  try {
+    const btns = JSON.parse(buttonsJson);
+    return (
+      Array.isArray(btns) &&
+      btns.some(
+        (b) =>
+          (b?.type === "URL" || b?.type === "url") &&
+          typeof b?.url === "string" &&
+          b.url.includes("{{"),
+      )
+    );
+  } catch {
+    // Non-array/plain string buttons payload — fall back to a loose scan.
+    return buttonsJson.includes("{{");
+  }
 }
 
 interface CreditBalance {
@@ -69,6 +115,18 @@ export default function SendMessagePage() {
   });
 
   const [variables, setVariables] = useState<Record<number, string>>({});
+  // Named-template param values (keyed by name) + media-header URL + dynamic
+  // button value, for templates that need them (e.g. niqen_invite).
+  const [namedValues, setNamedValues] = useState<Record<string, string>>({});
+  const [headerMediaUrl, setHeaderMediaUrl] = useState("");
+  const [buttonValue, setButtonValue] = useState("");
+  // Header image upload: base64 payload (data stripped of the data: prefix) +
+  // original filename. When set, it is sent instead of the URL — the server
+  // stores it in MediaStore and gives Meta a public URL to fetch.
+  const [headerMediaBase64, setHeaderMediaBase64] = useState("");
+  const [headerMediaFileName, setHeaderMediaFileName] = useState("");
+  const [headerMediaUploading, setHeaderMediaUploading] = useState(false);
+  const headerMediaInputRef = useRef<HTMLInputElement>(null);
 
   // Recipients — manual textarea or CSV
   const [recipientMode, setRecipientMode] = useState<"manual" | "csv">(
@@ -211,27 +269,79 @@ export default function SendMessagePage() {
     reader.readAsText(file);
   };
 
-  const selectedTemplate = templates.find((t) => t.id === formData.templateId);
-
-  const extractVariables = (text: string) => {
-    const regex = /\{\{(\d+)\}\}/g;
-    const found: number[] = [];
-    let match;
-    while ((match = regex.exec(text)) !== null) {
-      if (!found.includes(parseInt(match[1]))) found.push(parseInt(match[1]));
+  // Read an uploaded header image/video/document into base64 for the send.
+  const handleHeaderMediaUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Guard: keep uploads reasonable (WhatsApp image limit is 5MB).
+    if (file.size > 5 * 1024 * 1024) {
+      setError("Header media must be 5MB or smaller.");
+      if (headerMediaInputRef.current) headerMediaInputRef.current.value = "";
+      return;
     }
-    return found.sort((a, b) => a - b);
+    setError("");
+    setHeaderMediaUploading(true);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const result = (ev.target?.result as string) || "";
+      // Strip the "data:<mime>;base64," prefix — the server stores raw base64.
+      const base64 = result.includes(",") ? result.split(",")[1] : result;
+      setHeaderMediaBase64(base64);
+      setHeaderMediaFileName(file.name);
+      setHeaderMediaUrl(""); // uploaded file takes precedence over a pasted URL
+      setHeaderMediaUploading(false);
+    };
+    reader.onerror = () => {
+      setError("Could not read the selected file.");
+      setHeaderMediaUploading(false);
+    };
+    reader.readAsDataURL(file);
   };
 
-  const templateVariables = selectedTemplate
-    ? extractVariables(selectedTemplate.body)
-    : [];
+  const clearHeaderMedia = () => {
+    setHeaderMediaBase64("");
+    setHeaderMediaFileName("");
+    if (headerMediaInputRef.current) headerMediaInputRef.current.value = "";
+  };
 
+  const selectedTemplate = templates.find((t) => t.id === formData.templateId);
+
+  const paramModel = selectedTemplate
+    ? parseBodyParams(selectedTemplate.body)
+    : ({ kind: "numbered", numbers: [] } as ReturnType<typeof parseBodyParams>);
+  const isNamed = paramModel.kind === "named";
+
+  // Numbered placeholders (empty for named templates).
+  const templateVariables = paramModel.kind === "numbered" ? paramModel.numbers : [];
+  // Named placeholders in declared order (empty for numbered templates).
+  const templateNamedVars = paramModel.kind === "named" ? paramModel.names : [];
+
+  const headerTypeLc = (selectedTemplate?.headerType || "").toLowerCase();
+  const isMediaHeader =
+    headerTypeLc === "image" ||
+    headerTypeLc === "video" ||
+    headerTypeLc === "document";
+  const hasDynamicButton =
+    !!selectedTemplate &&
+    selectedTemplate.category !== "authentication" &&
+    templateHasDynamicButton(selectedTemplate.buttons);
+
+  // Resolved preview: substitute the entered values into the body. Named by
+  // name; numbered by {{n}} (indexed by the token value, not list position).
   const previewBody = selectedTemplate
-    ? templateVariables.reduce(
-        (acc, v) => acc.replace(`{{${v}}}`, variables[v] || `{{${v}}}`),
-        selectedTemplate.body,
-      )
+    ? isNamed
+      ? templateNamedVars.reduce(
+          (acc, name) =>
+            acc.replace(
+              new RegExp(`\\{\\{\\s*${name}\\s*\\}\\}`, "g"),
+              namedValues[name] || `{{${name}}}`,
+            ),
+          selectedTemplate.body,
+        )
+      : templateVariables.reduce(
+          (acc, v) => acc.replace(`{{${v}}}`, variables[v] || `{{${v}}}`),
+          selectedTemplate.body,
+        )
     : "";
 
   const handleSend = async (e: React.FormEvent) => {
@@ -245,19 +355,38 @@ export default function SendMessagePage() {
     if (parsedRecipients.length === 0)
       return setError("Please enter at least one recipient phone number");
 
-    const hasCsvVars = Object.keys(csvPerRecipientVars).length > 0;
-    const missingVars = templateVariables.filter((v) => {
-      if (
-        hasCsvVars &&
-        Object.values(csvPerRecipientVars)[0]?.[v] !== undefined
-      )
-        return false;
-      return !variables[v];
-    });
-    if (missingVars.length > 0) {
+    if (isNamed) {
+      const missingNamed = templateNamedVars.filter((n) => !namedValues[n]);
+      if (missingNamed.length > 0) {
+        return setError(
+          `Fill in template variables: ${missingNamed.map((n) => `{{${n}}}`).join(", ")}`,
+        );
+      }
+    } else {
+      const hasCsvVars = Object.keys(csvPerRecipientVars).length > 0;
+      const missingVars = templateVariables.filter((v) => {
+        if (
+          hasCsvVars &&
+          Object.values(csvPerRecipientVars)[0]?.[v] !== undefined
+        )
+          return false;
+        return !variables[v];
+      });
+      if (missingVars.length > 0) {
+        return setError(
+          `Fill in template variables: ${missingVars.map((v) => `{{${v}}}`).join(", ")}`,
+        );
+      }
+    }
+
+    // Media-header templates need a source: either a public URL or an upload.
+    if (isMediaHeader && !headerMediaUrl.trim() && !headerMediaBase64) {
       return setError(
-        `Fill in template variables: ${missingVars.map((v) => `{{${v}}}`).join(", ")}`,
+        `This template has a ${headerTypeLc} header — upload a file or provide a public media URL.`,
       );
+    }
+    if (hasDynamicButton && !buttonValue.trim()) {
+      return setError("This template has a dynamic button — provide a button value.");
     }
 
     const needed = parsedRecipients.length;
@@ -281,9 +410,36 @@ export default function SendMessagePage() {
             numberId: formData.numberId,
             recipient: phone.replace(/\D/g, ""),
             templateId: formData.templateId,
-            variables: templateVariables.map(
-              (v) => csvPerRecipientVars[phone]?.[v] ?? variables[v] ?? "",
-            ),
+            // Body params: named map for named templates, positional array for
+            // numbered (CSV per-recipient values still apply to numbered).
+            ...(isNamed
+              ? { namedParams: namedValues }
+              : {
+                  variables: templateVariables.map(
+                    (v) => csvPerRecipientVars[phone]?.[v] ?? variables[v] ?? "",
+                  ),
+                }),
+            // Media header source — an uploaded file (base64) takes precedence
+            // over a pasted URL. The server stores base64 in MediaStore and
+            // gives Meta a public URL to fetch.
+            ...(isMediaHeader
+              ? headerMediaBase64
+                ? headerTypeLc === "document"
+                  ? {
+                      documentBase64: headerMediaBase64,
+                      fileName: headerMediaFileName,
+                    }
+                  : { mediaBase64: headerMediaBase64 }
+                : headerMediaUrl.trim()
+                  ? headerTypeLc === "document"
+                    ? { documentUrl: headerMediaUrl.trim() }
+                    : { mediaUrl: headerMediaUrl.trim() }
+                  : {}
+              : {}),
+            // Dynamic URL button value.
+            ...(hasDynamicButton && buttonValue.trim()
+              ? { buttonParam: buttonValue.trim() }
+              : {}),
           }),
         });
         const data = await res.json();
@@ -311,6 +467,7 @@ export default function SendMessagePage() {
   };
 
   const resetForm = () => {
+    clearHeaderMedia();
     setRecipientText("");
     setParsedRecipients([]);
     setCsvPerRecipientVars({});
@@ -404,6 +561,10 @@ export default function SendMessagePage() {
                   onChange={(e) => {
                     setFormData({ ...formData, templateId: e.target.value });
                     setVariables({});
+                    setNamedValues({});
+                    setHeaderMediaUrl("");
+                    setButtonValue("");
+                    clearHeaderMedia();
                   }}
                   required
                 >
@@ -424,8 +585,112 @@ export default function SendMessagePage() {
                 )}
               </div>
 
-              {/* Template Variables */}
-              {templateVariables.length > 0 && (
+              {/* Named template variables (e.g. {{event}}, {{guest_name}}) */}
+              {isNamed && templateNamedVars.length > 0 && (
+                <div className="space-y-3 pt-1">
+                  <Label>Template Variables</Label>
+                  {templateNamedVars.map((name) => (
+                    <div key={name}>
+                      <Label className="text-xs text-muted-foreground mb-1 block">
+                        {"{{" + name + "}}"}
+                      </Label>
+                      <Input
+                        placeholder={`Value for {{${name}}}`}
+                        value={namedValues[name] || ""}
+                        onChange={(e) =>
+                          setNamedValues({
+                            ...namedValues,
+                            [name]: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Media header: upload a file OR paste a public URL */}
+              {isMediaHeader && (
+                <div className="space-y-2 pt-1">
+                  <Label className="text-xs text-muted-foreground">
+                    Header media ({headerTypeLc})
+                  </Label>
+
+                  {/* Upload */}
+                  {headerMediaFileName ? (
+                    <div className="flex items-center justify-between rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                      <span className="flex items-center gap-2 min-w-0">
+                        <FileText className="w-4 h-4 shrink-0 text-muted-foreground" />
+                        <span className="truncate">{headerMediaFileName}</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={clearHeaderMedia}
+                        className="shrink-0 text-xs text-red-500 hover:text-red-700"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <div
+                      className="border-2 border-dashed rounded-md p-4 text-center cursor-pointer hover:bg-muted/50 transition-colors"
+                      onClick={() => headerMediaInputRef.current?.click()}
+                    >
+                      <input
+                        ref={headerMediaInputRef}
+                        type="file"
+                        accept={
+                          headerTypeLc === "image"
+                            ? "image/*"
+                            : headerTypeLc === "video"
+                              ? "video/*"
+                              : "application/pdf"
+                        }
+                        className="hidden"
+                        onChange={handleHeaderMediaUpload}
+                      />
+                      <Upload className="w-6 h-6 mx-auto mb-1 text-muted-foreground" />
+                      <p className="text-sm text-muted-foreground">
+                        {headerMediaUploading
+                          ? "Reading file…"
+                          : `Click to upload ${headerTypeLc} (max 5MB)`}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* OR paste a URL (disabled once a file is chosen) */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">or URL:</span>
+                    <Input
+                      placeholder="https://… (public URL Meta can fetch)"
+                      value={headerMediaUrl}
+                      onChange={(e) => setHeaderMediaUrl(e.target.value)}
+                      disabled={!!headerMediaFileName}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    This template has a {headerTypeLc} header. Upload a file or
+                    paste a public URL — Meta fetches the media to send it.
+                  </p>
+                </div>
+              )}
+
+              {/* Dynamic URL button value */}
+              {hasDynamicButton && (
+                <div className="space-y-1 pt-1">
+                  <Label className="text-xs text-muted-foreground">
+                    Button value
+                  </Label>
+                  <Input
+                    placeholder="Value for the button's dynamic URL"
+                    value={buttonValue}
+                    onChange={(e) => setButtonValue(e.target.value)}
+                  />
+                </div>
+              )}
+
+              {/* Numbered template variables */}
+              {!isNamed && templateVariables.length > 0 && (
                 <div className="space-y-3 pt-1">
                   <div className="flex items-center gap-2">
                     <Label>Template Variables</Label>
