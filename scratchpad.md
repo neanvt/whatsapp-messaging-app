@@ -1,6 +1,6 @@
 # WhatsApp Business Messaging Platform — Technical Reference
 
-Last updated: 2026-10-20
+Last updated: 2026-10-16
 
 ## Overview
 
@@ -215,7 +215,7 @@ the platform one without a rebuild.
 | POST | `/api/templates/[id]/submit` | Submit template to Meta (per-tenant WABA; optional `numberId` in body) |
 | POST | `/api/templates/[id]/duplicate` | Duplicate a template |
 | POST | `/api/templates/sync` | Sync template statuses from Meta (iterates ALL of the tenant's connected WABAs) |
-| GET/POST | `/api/messages` | List / query messages. GET is `session.user.id`-scoped, explicit `select` (NOT include — no `userId`/`whatsappNumberId`/`conversationId`/`metaMessageId` leaked) returning `id,recipientPhone,status,direction,templateVariables (raw),errorMessage,content,sentAt,deliveredAt,readAt,createdAt,template{name,body},whatsappNumber{phoneNumber}`, newest first, take 100 |
+| GET/POST | `/api/messages` | List / query messages. GET is `session.user.id`-scoped, explicit `select` (NOT include — no `userId`/`whatsappNumberId`/`conversationId`/`metaMessageId` leaked) returning `id,recipientPhone,status,direction,templateVariables (raw),errorMessage,content,sentAt,deliveredAt,readAt,createdAt,template{name,body},whatsappNumber{phoneNumber}`, newest first. **Paginated OBJECT shape** `{ messages, total, page, pageSize, totalPages, counts:{ total, byStatus } }` (not a flat array). Query params: `page` (1-based, default 1), `pageSize` (default 20, clamp 1..100), `status` (optional; one of queued/sent/delivered/read/failed/received, else treated as all), `search` (optional; `recipientPhone contains` OR `template.name contains`, ASCII-insensitive, no `mode`). `total`/`totalPages` respect the status filter; `counts.byStatus` + `counts.total` (via `groupBy(by status)`) ignore the status filter so tiles show the full per-search breakdown. All four queries `userId`-scoped. |
 | POST | `/api/messages/send` | **Send a template message via Meta** |
 | GET | `/api/chat/conversations` | List conversations |
 | GET | `/api/chat/[contactPhone]/messages` | Messages for a contact |
@@ -626,6 +626,33 @@ There is no test runner installed; these two checks are the full gate.
   compile step or new dependency.
 
 ## Change log
+
+### 2026-10-16 — Message History: status counts + status filter + server-side pagination (implemented)
+- **`GET /api/messages` response changed from a flat array to an OBJECT**
+  `{ messages, total, page, pageSize, totalPages, counts:{ total, byStatus } }`.
+  Replaced the hard `take:100` with real pagination (`page`/`pageSize` query
+  params; `pageSize` clamped 1..100, default 20) and added `status` + `search`
+  query params. Four `userId`-scoped queries via `Promise.all`: `findMany`
+  (skip/take, existing `select` + `orderBy createdAt desc` kept verbatim),
+  `count` (respects search + status filter), and `groupBy(by:['status'])`
+  (respects search only, ignores the status filter) — `counts.byStatus` plus a
+  summed `counts.total` drive the summary tiles for the full filtered dataset.
+  Search is `recipientPhone contains` OR `template.name contains` (SQLite ASCII-
+  insensitive, no `mode`). Auth 401 / error 500 preserved.
+- **Dashboard `src/app/dashboard/messages/page.tsx`** — added a row of clickable
+  summary tiles (All/total + per-status: Sent, Delivered, Read, Failed, Queued,
+  Received) that double as the status filter (active tile highlighted with
+  `ring-2 ring-primary`, labels reuse `getStatusBadge`). Converted to server-
+  driven fetching: builds the query string from `page`/`statusFilter`/debounced
+  `search` (~350ms), resets to page 1 on filter/search change, and added bottom
+  pagination controls (Previous/Next disabled at bounds, `Page X of Y`,
+  `Showing X–Y of Z`). The 10s silent auto-refresh now re-fetches the CURRENT
+  page/filter/search (via a ref) instead of resetting them. Empty state shows
+  "No messages match this filter" when a filter/search is active. Expandable row
+  detail, Send New Message, and the "Updated HH:MM:SS" refresh button KEPT.
+- No schema change, no new dependency. Verified: `npx tsc --noEmit` clean,
+  `npm run lint` clean (only pre-existing unrelated warnings), `npm run build`
+  succeeds.
 
 ### 2026-10-20 (c) — Design REVISION: Send page NAMED/MEDIA/BUTTON (planning only)
 - Revised `.agents/tasks/send-named-media-button/send-named-media-design.md` to resolve all

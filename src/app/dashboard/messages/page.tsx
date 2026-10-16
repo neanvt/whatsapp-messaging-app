@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -18,6 +18,7 @@ import {
   Search,
   ChevronRight,
   ChevronDown,
+  ChevronLeft,
 } from "lucide-react";
 import Link from "next/link";
 import { resolveBodyPreview } from "@/lib/template-params";
@@ -37,6 +38,32 @@ interface Message {
   template: { name: string; body: string | null } | null;
   whatsappNumber: { phoneNumber: string } | null;
 }
+
+interface MessagesCounts {
+  total: number;
+  byStatus: Record<string, number>;
+}
+
+interface MessagesResponse {
+  messages: Message[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  counts: MessagesCounts;
+}
+
+const PAGE_SIZE = 20;
+
+// Status tiles in display order; "all" is rendered separately as the total tile.
+const STATUS_TILES: { value: string; label: string }[] = [
+  { value: "sent", label: "Sent" },
+  { value: "delivered", label: "Delivered" },
+  { value: "read", label: "Read" },
+  { value: "failed", label: "Failed" },
+  { value: "queued", label: "Queued" },
+  { value: "received", label: "Received" },
+];
 
 // Parse the stored templateVariables JSON string defensively — never throw.
 function safeParse(
@@ -60,32 +87,73 @@ export default function MessagesPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [counts, setCounts] = useState<MessagesCounts>({
+    total: 0,
+    byStatus: {},
+  });
+
+  // Debounce the free-text search (~350ms) before it drives the server query.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const fetchMessages = useCallback(
+    async (silent = false) => {
+      if (!silent) setLoading(true);
+      else setRefreshing(true);
+      try {
+        const params = new URLSearchParams();
+        params.set("page", String(page));
+        params.set("pageSize", String(PAGE_SIZE));
+        if (statusFilter !== "all") params.set("status", statusFilter);
+        if (debouncedSearch) params.set("search", debouncedSearch);
+
+        const res = await fetch(`/api/messages?${params.toString()}`);
+        if (res.ok) {
+          const data: MessagesResponse = await res.json();
+          setMessages(data.messages);
+          setTotal(data.total);
+          setTotalPages(data.totalPages);
+          setCounts(data.counts);
+          setLastUpdated(new Date());
+        }
+      } catch (error) {
+        console.error("Failed to fetch messages:", error);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [page, statusFilter, debouncedSearch],
+  );
+
+  // Reset to page 1 whenever the filter or search changes.
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter, debouncedSearch]);
+
+  // Fetch whenever the current view (page/filter/search) changes.
   useEffect(() => {
     fetchMessages();
-    // Auto-refresh every 10 seconds to pick up webhook delivery status updates
-    const interval = setInterval(() => fetchMessages(true), 10000);
+  }, [fetchMessages]);
+
+  // Silent auto-refresh every 10s against the CURRENT page/filter/search.
+  const fetchRef = useRef(fetchMessages);
+  useEffect(() => {
+    fetchRef.current = fetchMessages;
+  }, [fetchMessages]);
+  useEffect(() => {
+    const interval = setInterval(() => fetchRef.current(true), 10000);
     return () => clearInterval(interval);
   }, []);
-
-  const fetchMessages = async (silent = false) => {
-    if (!silent) setLoading(true);
-    else setRefreshing(true);
-    try {
-      const res = await fetch("/api/messages");
-      if (res.ok) {
-        const data = await res.json();
-        setMessages(data);
-        setLastUpdated(new Date());
-      }
-    } catch (error) {
-      console.error("Failed to fetch messages:", error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -105,11 +173,9 @@ export default function MessagesPage() {
     }
   };
 
-  const filteredMessages = messages.filter(
-    (m) =>
-      m.recipientPhone.includes(search) ||
-      m.template?.name.toLowerCase().includes(search.toLowerCase()),
-  );
+  const hasActiveFilter = statusFilter !== "all" || debouncedSearch !== "";
+  const showingFrom = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const showingTo = Math.min(page * PAGE_SIZE, total);
 
   return (
     <div>
@@ -143,6 +209,40 @@ export default function MessagesPage() {
         </div>
       </div>
 
+      {/* Status summary tiles — clickable filters */}
+      <div className="grid grid-cols-2 gap-3 mb-6 sm:grid-cols-4 lg:grid-cols-7">
+        <button
+          type="button"
+          onClick={() => setStatusFilter("all")}
+          className={`rounded-lg border bg-card p-4 text-left transition-colors hover:bg-accent ${
+            statusFilter === "all" ? "ring-2 ring-primary border-primary" : ""
+          }`}
+          aria-pressed={statusFilter === "all"}
+        >
+          <div className="text-2xl font-bold">{counts.total}</div>
+          <div className="mt-1 text-sm text-muted-foreground">All</div>
+        </button>
+        {STATUS_TILES.map((tile) => {
+          const active = statusFilter === tile.value;
+          return (
+            <button
+              key={tile.value}
+              type="button"
+              onClick={() => setStatusFilter(tile.value)}
+              className={`rounded-lg border bg-card p-4 text-left transition-colors hover:bg-accent ${
+                active ? "ring-2 ring-primary border-primary" : ""
+              }`}
+              aria-pressed={active}
+            >
+              <div className="text-2xl font-bold">
+                {counts.byStatus[tile.value] ?? 0}
+              </div>
+              <div className="mt-1">{getStatusBadge(tile.value)}</div>
+            </button>
+          );
+        })}
+      </div>
+
       <Card className="mb-6">
         <CardContent className="pt-6">
           <div className="relative">
@@ -161,19 +261,19 @@ export default function MessagesPage() {
         <div className="flex items-center justify-center py-12">
           <RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" />
         </div>
-      ) : filteredMessages.length === 0 ? (
+      ) : messages.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <MessageSquare className="w-12 h-12 text-muted-foreground mb-4" />
             <h3 className="text-lg font-medium mb-2">
-              {search ? "No Messages Found" : "No Messages Yet"}
+              {hasActiveFilter ? "No Messages Found" : "No Messages Yet"}
             </h3>
             <p className="text-muted-foreground text-center mb-4">
-              {search
-                ? "Try adjusting your search"
+              {hasActiveFilter
+                ? "No messages match this filter"
                 : "Start by sending your first WhatsApp message."}
             </p>
-            {!search && (
+            {!hasActiveFilter && (
               <Button asChild>
                 <Link href="/dashboard/messages/send">
                   Send Your First Message
@@ -207,7 +307,7 @@ export default function MessagesPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredMessages.map((message) => {
+                {messages.map((message) => {
                   const expanded = expandedId === message.id;
                   const vars = safeParse(message.templateVariables);
                   const varEntries = Array.isArray(vars)
@@ -353,6 +453,36 @@ export default function MessagesPage() {
                 })}
               </tbody>
             </table>
+          </div>
+
+          {/* Pagination controls */}
+          <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm text-muted-foreground">
+              Showing {showingFrom}&ndash;{showingTo} of {total}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={loading || page <= 1}
+              >
+                <ChevronLeft className="w-4 h-4 mr-1" />
+                Previous
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                Page {page} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={loading || page >= totalPages}
+              >
+                Next
+                <ChevronRight className="w-4 h-4 ml-1" />
+              </Button>
+            </div>
           </div>
         </Card>
       )}
