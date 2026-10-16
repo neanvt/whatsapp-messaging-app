@@ -13,8 +13,8 @@ const VALID_STATUSES = [
   "received",
 ] as const;
 
-const DEFAULT_PAGE_SIZE = 20;
-const MAX_PAGE_SIZE = 100;
+const DEFAULT_PAGE_SIZE = 25;
+const MAX_PAGE_SIZE = 200;
 
 // GET - List user's messages (paginated, with status filter, search, and counts)
 export async function GET(request: Request) {

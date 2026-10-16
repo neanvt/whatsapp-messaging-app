@@ -53,7 +53,8 @@ interface MessagesResponse {
   counts: MessagesCounts;
 }
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
+const DEFAULT_PAGE_SIZE = 25;
 
 // Status tiles in display order; "all" is rendered separately as the total tile.
 const STATUS_TILES: { value: string; label: string }[] = [
@@ -91,6 +92,7 @@ export default function MessagesPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const [statusFilter, setStatusFilter] = useState("all");
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -112,7 +114,7 @@ export default function MessagesPage() {
       try {
         const params = new URLSearchParams();
         params.set("page", String(page));
-        params.set("pageSize", String(PAGE_SIZE));
+        params.set("pageSize", String(pageSize));
         if (statusFilter !== "all") params.set("status", statusFilter);
         if (debouncedSearch) params.set("search", debouncedSearch);
 
@@ -132,13 +134,13 @@ export default function MessagesPage() {
         setRefreshing(false);
       }
     },
-    [page, statusFilter, debouncedSearch],
+    [page, pageSize, statusFilter, debouncedSearch],
   );
 
-  // Reset to page 1 whenever the filter or search changes.
+  // Reset to page 1 whenever the filter, search, or page size changes.
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, debouncedSearch]);
+  }, [statusFilter, debouncedSearch, pageSize]);
 
   // Fetch whenever the current view (page/filter/search) changes.
   useEffect(() => {
@@ -174,8 +176,8 @@ export default function MessagesPage() {
   };
 
   const hasActiveFilter = statusFilter !== "all" || debouncedSearch !== "";
-  const showingFrom = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const showingTo = Math.min(page * PAGE_SIZE, total);
+  const showingFrom = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const showingTo = Math.min(page * pageSize, total);
 
   return (
     <div>
@@ -457,8 +459,30 @@ export default function MessagesPage() {
 
           {/* Pagination controls */}
           <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="text-sm text-muted-foreground">
-              Showing {showingFrom}&ndash;{showingTo} of {total}
+            <div className="flex items-center gap-3">
+              <div className="text-sm text-muted-foreground">
+                Showing {showingFrom}&ndash;{showingTo} of {total}
+              </div>
+              <div className="flex items-center gap-2">
+                <label
+                  htmlFor="pageSize"
+                  className="text-sm text-muted-foreground"
+                >
+                  Per page
+                </label>
+                <select
+                  id="pageSize"
+                  value={pageSize}
+                  onChange={(e) => setPageSize(Number(e.target.value))}
+                  className="h-8 rounded-md border bg-background px-2 text-sm"
+                >
+                  {PAGE_SIZE_OPTIONS.map((size) => (
+                    <option key={size} value={size}>
+                      {size}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <Button

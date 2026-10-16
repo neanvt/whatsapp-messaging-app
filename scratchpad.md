@@ -215,7 +215,7 @@ the platform one without a rebuild.
 | POST | `/api/templates/[id]/submit` | Submit template to Meta (per-tenant WABA; optional `numberId` in body) |
 | POST | `/api/templates/[id]/duplicate` | Duplicate a template |
 | POST | `/api/templates/sync` | Sync template statuses from Meta (iterates ALL of the tenant's connected WABAs) |
-| GET/POST | `/api/messages` | List / query messages. GET is `session.user.id`-scoped, explicit `select` (NOT include — no `userId`/`whatsappNumberId`/`conversationId`/`metaMessageId` leaked) returning `id,recipientPhone,status,direction,templateVariables (raw),errorMessage,content,sentAt,deliveredAt,readAt,createdAt,template{name,body},whatsappNumber{phoneNumber}`, newest first. **Paginated OBJECT shape** `{ messages, total, page, pageSize, totalPages, counts:{ total, byStatus } }` (not a flat array). Query params: `page` (1-based, default 1), `pageSize` (default 20, clamp 1..100), `status` (optional; one of queued/sent/delivered/read/failed/received, else treated as all), `search` (optional; `recipientPhone contains` OR `template.name contains`, ASCII-insensitive, no `mode`). `total`/`totalPages` respect the status filter; `counts.byStatus` + `counts.total` (via `groupBy(by status)`) ignore the status filter so tiles show the full per-search breakdown. All four queries `userId`-scoped. |
+| GET/POST | `/api/messages` | List / query messages. GET is `session.user.id`-scoped, explicit `select` (NOT include — no `userId`/`whatsappNumberId`/`conversationId`/`metaMessageId` leaked) returning `id,recipientPhone,status,direction,templateVariables (raw),errorMessage,content,sentAt,deliveredAt,readAt,createdAt,template{name,body},whatsappNumber{phoneNumber}`, newest first. **Paginated OBJECT shape** `{ messages, total, page, pageSize, totalPages, counts:{ total, byStatus } }` (not a flat array). Query params: `page` (1-based, default 1), `pageSize` (default 25, clamp 1..200; UI selector offers 25/50/100/200), `status` (optional; one of queued/sent/delivered/read/failed/received, else treated as all), `search` (optional; `recipientPhone contains` OR `template.name contains`, ASCII-insensitive, no `mode`). `total`/`totalPages` respect the status filter; `counts.byStatus` + `counts.total` (via `groupBy(by status)`) ignore the status filter so tiles show the full per-search breakdown. All four queries `userId`-scoped. |
 | POST | `/api/messages/send` | **Send a template message via Meta** |
 | GET | `/api/chat/conversations` | List conversations |
 | GET | `/api/chat/[contactPhone]/messages` | Messages for a contact |
@@ -626,6 +626,15 @@ There is no test runner installed; these two checks are the full gate.
   compile step or new dependency.
 
 ## Change log
+
+### 2026-10-16 — Message History: selectable page size (25/50/100/200)
+- **`GET /api/messages`**: raised `MAX_PAGE_SIZE` 100 → 200 and `DEFAULT_PAGE_SIZE`
+  20 → 25 in `src/app/api/messages/route.ts`.
+- **Message History page** (`src/app/dashboard/messages/page.tsx`): replaced the
+  fixed `PAGE_SIZE` constant with `pageSize` state (default 25) and a "Per page"
+  `<select>` in the pagination bar offering 25/50/100/200. Changing it resets to
+  page 1 and refetches; the "Showing X–Y of Z" math and query string now use the
+  selected size. Verified: `tsc --noEmit` clean, `npm run build` succeeds.
 
 ### 2026-10-16 — Message History: status counts + status filter + server-side pagination (implemented)
 - **`GET /api/messages` response changed from a flat array to an OBJECT**
